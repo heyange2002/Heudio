@@ -1,0 +1,1 @@
+{"name":"@heudio/qq-service","private":true,"version":"0.4.0","scripts":{"start":"node --env-file-if-exists=.env start.cjs"},"dependencies":{"@yakult-green-tea/qq-music-api":"3.3.5"}}

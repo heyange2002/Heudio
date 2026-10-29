@@ -5,3 +5,6 @@ node_modules/
 !.env.example
 .openai/
 *.log
+frontend/dist/
+**/.auth-state/
+/dist/

@@ -1,19 +1,17 @@
-const assert=require('node:assert/strict');
-const {readFileSync}=require('node:fs');const vm=require('node:vm');const {webcrypto}=require('node:crypto');
-const disk=new Map(),calls=[];let answer={};
-const sandbox={window:{},URL,URLSearchParams,TextEncoder,Uint8Array,DataView,AbortSignal,crypto:webcrypto,location:{href:'https://sonora.example/',protocol:'https:'},localStorage:{getItem:k=>disk.get(k),setItem:(k,v)=>disk.set(k,v)},fetch:async(u,o)=>{calls.push({url:String(u),options:o});return {ok:true,json:async()=>answer}}};
-vm.runInNewContext(readFileSync(require('node:path').join(__dirname,'../dist/providers.js'),'utf8'),sandbox);const api=sandbox.window.MusicSources;
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const disk=new Map(),calls=[];let answer={data:{items:[]}};
+const sandbox={window:{HEUDIO_CONFIG:{apiBase:'/api/v1'}},URL,URLSearchParams,AbortSignal,location:{href:'https://heudio.example/',protocol:'https:'},localStorage:{getItem:k=>disk.get(k),setItem:(k,v)=>disk.set(k,v)},fetch:async(url,opts)=>{calls.push({url,opts});return {ok:true,status:200,json:async()=>answer}}};
+vm.createContext(sandbox);
+for(const name of ['api.js','providers.js']){vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend/public',name),'utf8'),sandbox);Object.assign(sandbox,sandbox.window)}
+const api=sandbox.window.MusicSources;
 (async()=>{
-for(const [input,expected]of [['','d41d8cd98f00b204e9800998ecf8427e'],['abc','900150983cd24fb0d6963f7d28e17f72'],['The quick brown fox jumps over the lazy dog','9e107d9d372bb6826bd81d3542a419d6']])assert.equal(api.md5(input),expected,'MD5 known vector');
-const lrc=api.parseLyrics('[ar:test]\n[00:01.50][00:05]第一行\n[00:08.25]第二行');assert.equal(lrc.length,3);assert.equal(lrc[0].start,1.5);assert.equal(lrc[0].end,5);assert.equal(api.atTime(lrc,0),-1);assert.equal(api.atTime(lrc,5),1);assert.equal(api.atTime(lrc,20),2);
+const rows=api.parseLyrics('[00:01.50][00:05]第一行\n[00:08.25]第二行');assert.equal(rows.length,3);assert.equal(api.atTime(rows,0),-1);assert.equal(api.atTime(rows,5),1);
 const yrc=api.parseLyrics('[1000,2000](1000,600,0)晚(1600,1400,0)风','yrc');assert.equal(yrc[0].text,'晚风');assert.equal(yrc[0].words[1].end,3);
-assert.throws(()=>api.configure('netease','http://untrusted.example'));assert.throws(()=>api.configure('netease','https://name:pass@example.com'));assert.equal(api.secureUrl('javascript:alert(1)'),'');
-api.configure('netease','https://music.example');answer={code:200,result:{songs:[{id:7,name:'测试曲',ar:[{name:'测试歌手'}],al:{picUrl:'https://cover.example/a.jpg'},dt:180000}]}};
-const songs=await api.search('netease','test & unicode 中文');assert.equal(songs[0].duration,180);assert.equal(songs[0].provider,'netease');assert.equal(calls.at(-1).options.method,'POST');assert.equal(new URLSearchParams(calls.at(-1).options.body).get('keywords'),'test & unicode 中文');
-answer={code:803,cookie:'MUSIC_U=example-session'};await api.qrCheck('netease','fake-key');answer={code:200,data:[{url:'https://audio.example/test.mp3',freeTrialInfo:{start:0,end:30}}]};const a=await api.getAudio(songs[0]);assert.equal(a.preview,true);assert.equal(new URLSearchParams(calls.at(-1).options.body).get('cookie'),'MUSIC_U=example-session');assert(!JSON.stringify([...disk]).includes('example-session'),'session is not persisted');
-answer={code:200,data:[{url:null}]};await assert.rejects(api.getAudio(songs[0]),/未取得可播放地址/);api.logout('netease');
-api.configure('qq','https://qq.example');answer={items:[{mid:'abc',name:'QQ测试',singer:[{name:'歌手'}],interval:200,album:{mid:'album'}}]};const qq=await api.search('qq','test');assert.equal(qq[0].mediaId,'abc');answer={data:{playUrl:{abc:{url:'https://audio.example/qq.mp3'}}}};assert.equal((await api.getAudio(qq[0])).url,'https://audio.example/qq.mp3');assert(calls.at(-1).url.includes('/getMusicPlay/abc'));
-api.configure('kugou','https://kg.example');answer={data:{lists:[{FileHash:'HASH',SongName:'KG测试',Duration:180,Image:'https://img.example/{size}/x.jpg'}]}};const kg=await api.search('kugou','test');assert.equal(kg[0].duration,180);assert.equal(kg[0].cover,'https://img.example/500/x.jpg');
-api.configure('navidrome','https://nav.example');api.navLogin('user','password');answer={'subsonic-response':{status:'ok',searchResult3:{song:[{id:'nav-1',title:'私有曲库',artist:'Artist',coverArt:'cover1',duration:200}]}}};const nav=await api.search('navidrome','test');assert.equal(nav[0].cover,'','signed cover URLs are not persisted');const stream=await api.getAudio(nav[0]);const u=new URL(stream.url);assert.equal(u.pathname,'/rest/stream.view');assert.equal(u.searchParams.get('u'),'user');assert.equal(u.searchParams.get('t'),api.md5('password'+u.searchParams.get('s')));assert(!stream.url.includes('password'));assert(!JSON.stringify([...disk]).includes('password'));
-console.log('PASS: lyric timelines, word timing, RFC MD5 vectors, endpoint validation, all four provider contracts, preview/error handling, session privacy.');
+assert.throws(()=>api.configure('qq','http://untrusted.example/api/v1'));assert.throws(()=>api.configure('qq','https://user:password@example.com'));assert.equal(api.secureUrl('javascript:alert(1)'),'');
+answer={data:{items:[{id:'qq-fixture',provider:'qq',mediaId:'fixture'}]}};const tracks=await api.search('qq','test & 中文');assert.equal(tracks.length,1);assert.equal(new URL(calls.at(-1).url).searchParams.get('q'),'test & 中文');assert.equal(calls.at(-1).opts.credentials,'include');assert.equal(calls.at(-1).opts.headers['X-Heudio-Client'],'web');
+answer={data:{streamPath:'/music/stream/fixture?quality=128',preview:true}};const audio=await api.getAudio(tracks[0]);assert.equal(audio.preview,true);assert.equal(audio.url,'https://heudio.example/api/v1/music/stream/fixture?quality=128');
+answer={data:{format:'lrc',text:'[00:01]词',translation:'[00:01]译'}};assert.match((await api.getLyrics(tracks[0])).translation,/译/);
+answer={data:{loggedIn:true,code:803}};await api.qrCheck('qq','key');assert(!JSON.stringify([...disk]).includes('token'));assert(!calls.some(c=>'X-QQ-Session'in c.opts.headers));
+answer={data:{loggedIn:false}};await api.logout('qq');assert.equal(calls.at(-1).opts.method,'DELETE');assert(calls.every(c=>new URL(c.url).origin==='https://heudio.example'));
+console.log('PASS: lyric timing, backend-only requests, encoded queries, cookies, stream URLs, previews and logout.');
 })().catch(e=>{console.error(e);process.exitCode=1});

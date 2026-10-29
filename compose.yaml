@@ -1,0 +1,36 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports: ["127.0.0.1:8080:80"]
+    depends_on: [backend]
+    restart: unless-stopped
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      QQ_API_BASE_URL: http://qq-api:3200
+      WEB_ORIGINS: ${WEB_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODELS: ${LLM_MODELS:-}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-}
+    depends_on: [qq-api]
+    restart: unless-stopped
+  qq-api:
+    build:
+      context: .
+      dockerfile: deploy/qq-api.Dockerfile
+    environment:
+      PORT: 3200
+      QQ_SESSION_SECRET: ${QQ_SESSION_SECRET:-}
+    volumes: ["qq-state:/app/.auth-state"]
+    restart: unless-stopped
+volumes:
+  qq-state:

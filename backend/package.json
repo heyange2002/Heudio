@@ -1,0 +1,1 @@
+{"name":"@heudio/backend","private":true,"version":"0.4.0","type":"module","scripts":{"start":"node --env-file-if-exists=.env src/server.mjs","dev":"node --env-file-if-exists=.env --watch src/server.mjs","test":"node --test test/*.test.mjs"},"engines":{"node":">=22"}}
