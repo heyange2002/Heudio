@@ -1,3 +1,6 @@
+import { QQMusicPanel } from './components/QQMusicPanel';
+import { CompanionProfile } from './components/CompanionProfile';
+import { qqTrack, parseLyrics, readLocal, saveLocal, type QQSong, type CompanionProfile as Profile } from './utils/music';
 import { workspaceView, type AppSection } from './utils/navigation';
 import { apiFetch } from './api';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -35,7 +38,7 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [tracks] = useState<MusicTrack[]>(INITIAL_TRACKS);
+  const [tracks, setTracks] = useState<MusicTrack[]>(INITIAL_TRACKS);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -49,7 +52,7 @@ export default function App() {
 
   // User controls & providers
   const [settings, setSettings] = useState<ServiceSettings>({
-    musicSource: 'soundisle-builtin',
+    musicSource: 'qq-music',
     chatModel: 'MiniMax-M3',
     voiceTts: 'minimax',
     voiceModel: DEFAULT_SPEECH.model,
@@ -84,17 +87,48 @@ export default function App() {
     {
       id: 'welcome',
       role: 'agent',
-      content: '我是声屿。此刻夜色已深，为你准备了温润的低保真代码流与微雨声。有任何需要或想调整节奏，随时告诉我。',
+      content: '我是阿屿。想聊聊今天，还是一起找首合心意的歌？你慢慢说，我在听。',
       timestamp: '刚刚',
-      rationale: '检测到当前为夜间心流时段，启动低疲劳度背景音景与68BPM节拍。',
+      rationale: '告诉我你的音乐口味或此刻的状态，我会陪你一起选歌。',
       quickActions: ['深夜写代码，需要深度专注', '有点累了想闭目放空', '准备入睡，请换轻柔声音', '换成纯钢琴'],
     },
   ]);
   const [isLoadingAgent, setIsLoadingAgent] = useState(false);
 
-  // Weather & time context
-  const [weatherText] = useState('微雨 19°C · 湿度 76%');
-  const [timeContextText] = useState('深夜 23:55 · 心流时区');
+  const [profile, setProfile] = useState<Profile>(() => readLocal('soundisle:profile', { name: '', city: '', preferences: '', workState: '未知' }));
+  const [listeningHistory, setListeningHistory] = useState<QQSong[]>(() => readLocal('soundisle:listening', []));
+  const [qqQueue, setQqQueue] = useState<QQSong[]>([]);
+  const [queueTitle, setQueueTitle] = useState('阿屿为你选的歌');
+  const [musicError, setMusicError] = useState('');
+  const [agentStatus, setAgentStatus] = useState('');
+  const chatController = useRef<AbortController | null>(null);
+  const [weatherText, setWeatherText] = useState('未设置城市，天气未知');
+  const [now, setNow] = useState(() => new Date());
+  const timeContextText = now.toLocaleString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + profile.workState;
+  useEffect(() => { saveLocal('soundisle:profile', profile); }, [profile]);
+  useEffect(() => { saveLocal('soundisle:listening', listeningHistory); }, [listeningHistory]);
+  useEffect(() => { const timer = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(timer); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = () => apiFetch('/api/context/weather?city=' + encodeURIComponent(profile.city), { signal: controller.signal }).then(async r => {
+      if (!r.ok) throw Error(); const data = await r.json(); if (!controller.signal.aborted) setWeatherText(data.summary);
+    }).catch(() => { if (!controller.signal.aborted) setWeatherText('天气暂时不可用'); });
+    setWeatherText(profile.city ? '正在获取天气…' : '未设置城市，天气未知');
+    const timer = setTimeout(load, 600); const interval = setInterval(load, 10 * 60000);
+    return () => { controller.abort(); clearTimeout(timer); clearInterval(interval); };
+  }, [profile.city]);
+  useEffect(() => {
+    audioEngine.onError(message => { setMusicError(message); setIsPlaying(false); });
+    audioEngine.onStarted(track => { if (track.qqMid) {
+      const song = { mid: track.qqMid, title: track.title, artist: track.artist, album: track.album, duration: track.duration, coverUrl: track.coverUrl };
+      setListeningHistory(prev => [...prev.filter(s => s.mid !== song.mid), song].slice(-15));
+    } });
+    return () => { chatController.current?.abort(); audioEngine.pause(); audioEngine.onError(() => {}); audioEngine.onStarted(() => {}); };
+  }, []);
+  useEffect(() => { audioEngine.setSpeechDucking(speechState.status === 'playing'); return () => audioEngine.setSpeechDucking(false); }, [speechState.status]);
+  useEffect(() => {
+    if (settings.musicSource === 'soundisle-builtin') { audioEngine.pause(); setIsPlaying(false); setTracks(INITIAL_TRACKS); setCurrentTrackIndex(0); setCurrentTime(0); }
+  }, [settings.musicSource]);
 
   const currentTrack = tracks[currentTrackIndex] || tracks[0];
 
@@ -155,7 +189,7 @@ export default function App() {
       audioEngine.pause();
       setIsPlaying(false);
     } else {
-      audioEngine.playTrack(currentTrack, currentTime);
+      setMusicError(''); audioEngine.playTrack(currentTrack, currentTime);
       setIsPlaying(true);
     }
   };
@@ -237,9 +271,35 @@ export default function App() {
     }
   };
 
+  const playQQSong = (song: QQSong) => {
+    const next = qqTrack(song, currentScene);
+    setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
+    setTracks(prev => [next, ...prev.filter(t => t.qqMid && t.qqMid !== song.mid)]);
+    setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
+    audioEngine.playTrack(next); setIsPlaying(true);
+  };
+  const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene) => {
+    if (!songs.length) return;
+    audioEngine.pause(); setIsPlaying(false);
+    setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
+    setQqQueue(songs); setQueueTitle(title); setTracks(songs.map(song => qqTrack(song, scene)));
+    setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
+  };
+  useEffect(() => {
+    if (!currentTrack.qqMid) return;
+    const mid = currentTrack.qqMid, controller = new AbortController();
+    apiFetch('/api/music/getLyric?songmid=' + encodeURIComponent(mid), { signal: controller.signal }).then(async r => {
+      if (!r.ok) return; const data = await r.json(); const lyrics = parseLyrics(data.response?.lyric);
+      if (!controller.signal.aborted) setTracks(prev => prev.map(t => t.qqMid === mid ? { ...t, lyrics } : t));
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [currentTrack.id]);
+
   // Agent message handling via server API with fallback
-  const handleSendMessage = async (text: string) => {
-    speechPlayer.stop();
+  const handleSendMessage = async (text: string, musicSource = settings.musicSource) => {
+    if (chatController.current) return;
+    const controller = new AbortController(); chatController.current = controller;
+    speechPlayer.stop(); setAgentStatus('阿屿正在听你说、为你想一想…');
     const userMsg: AgentMessage = {
       id: String(Date.now()),
       role: 'user',
@@ -254,10 +314,13 @@ export default function App() {
       let resultData;
       // Send the selected engine to the backend.
       const response = await apiFetch('/api/agent/chat', {
-        method: 'POST',
+        method: 'POST', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          profile, musicSource, listeningHistory,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          history: messages.filter(m => m.role !== 'system' && m.id !== 'welcome').slice(-12).map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content })),
           chatModel: settings.chatModel,
           currentScene,
           currentTrack: currentTrack.title,
@@ -277,6 +340,9 @@ export default function App() {
         resultData = analyzeUserPrompt(text, { currentScene });
       }
 
+      if (controller.signal.aborted) return;
+      setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : '阿屿 · MiniMax M3' + (resultData.playlist ? ' · 已为你编排歌单' : ''));
+      if (resultData.playlist?.songs?.length) installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId);
       const agentMsg: AgentMessage = {
         id: String(Date.now() + 1),
         role: 'agent',
@@ -295,7 +361,7 @@ export default function App() {
         setCurrentScene(resultData.recommendedSceneId as SceneMode);
       }
 
-      if (resultData.recommendedTrackId) {
+      if (settings.musicSource === 'soundisle-builtin' && resultData.recommendedTrackId) {
         const foundIdx = tracks.findIndex((t) => t.id === resultData.recommendedTrackId);
         if (foundIdx !== -1 && foundIdx !== currentTrackIndex) {
           setCurrentTrackIndex(foundIdx);
@@ -313,7 +379,8 @@ export default function App() {
 
       autoSpeak(resultData.reply);
     } catch (e) {
-      console.error('Agent chat error:', e);
+      if (controller.signal.aborted) return;
+      setAgentStatus('暂时无法连接阿屿，当前为规则回复');
       // Fallback
       const fallback = analyzeUserPrompt(text, { currentScene });
       setMessages((prev) => [
@@ -329,7 +396,8 @@ export default function App() {
       ]);
       autoSpeak(fallback.reply);
     } finally {
-      setIsLoadingAgent(false);
+      if (!controller.signal.aborted) setIsLoadingAgent(false);
+      if (chatController.current === controller) chatController.current = null;
     }
   };
 
@@ -414,6 +482,11 @@ export default function App() {
           </div>
         )}
 
+        <QQMusicPanel source={settings.musicSource} onSource={source => setSettings(prev => ({ ...prev, musicSource: source }))}
+          onPlay={playQQSong} onQueue={installQueue} queue={qqQueue} queueTitle={queueTitle}
+          onRecommend={() => { setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); setActiveSection('companion'); void handleSendMessage('结合我的音乐偏好、当前时间和状态，为我编排几首适合现在听的 QQ 音乐。', 'qq-music'); }}/>
+        {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="text-xs text-stone-500">还未选择 QQ 歌曲，播放器暂用内建声景。搜索歌曲或让阿屿为你选歌后，即可播放 QQ 音乐。</p>}
+        {musicError && <p role="alert" className="text-sm text-rose-300">{musicError}</p>}
         {/* 2. Core Workspace Layout */}
         <div ref={workspaceRef} id="music-workspace" tabIndex={-1} className="scroll-mt-32 lg:scroll-mt-24 outline-none" data-view={view}>
         {view === 'visualizer' ? (
@@ -454,6 +527,9 @@ export default function App() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: Agent Companion & Measured Dialogue */}
             <div className="lg:col-span-5 space-y-4">
+              <CompanionProfile profile={profile} onChange={setProfile}/>
+              {!!listeningHistory.length && <button className="text-xs text-stone-500" onClick={() => setListeningHistory([])}>清除本机近期听歌记录</button>}
+              {agentStatus && <p role="status" className="text-xs text-stone-400">{agentStatus}</p>}
               <AgentCompanion
                 messages={messages}
                 onSendMessage={handleSendMessage}
@@ -515,28 +591,7 @@ export default function App() {
 
         </div>
 
-        {/* 3. Product Values & User Control Assurances (Subtle editorial section) */}
-        {!settings.pureMusicMode && (
-          <section className="pt-8 border-t border-stone-800/70">
-            <h3 className="text-sm font-semibold text-stone-300 mb-4">
-              声屿设计守则 · 以人为本的轻陪伴
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-stone-400 leading-relaxed">
-              <div className="p-4 rounded-xl bg-stone-900/40 border border-stone-800/60 space-y-1">
-                <h4 className="font-semibold text-stone-200">01. 降低找歌负荷</h4>
-                <p>无论何时，只需简单描述你的状态或需求，声屿即刻编排吻合当下的音律。</p>
-              </div>
-              <div className="p-4 rounded-xl bg-stone-900/40 border border-stone-800/60 space-y-1">
-                <h4 className="font-semibold text-stone-200">02. 尊重注意力留白</h4>
-                <p>对话始终保持克制适度，支持随时一键切换为纯音乐模式或关闭律动动效。</p>
-              </div>
-              <div className="p-4 rounded-xl bg-stone-900/40 border border-stone-800/60 space-y-1">
-                <h4 className="font-semibold text-stone-200">03. 供应商全面解耦</h4>
-                <p>音乐源、AI 聊天模型与 TTS 语音均可自由替换，确保纯净、自主与长久陪伴。</p>
-              </div>
-            </div>
-          </section>
-        )}
+
       </main>
 
       {/* Floating Bottom Player Controls Dock */}

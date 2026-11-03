@@ -1,3 +1,6 @@
+import { musicRoute, createMusicClient } from './cloudflare/music.mjs';
+import { getWeather } from './cloudflare/context.mjs';
+import { randomBytes } from 'node:crypto';
 import { companionChat, companionConfig } from './cloudflare/companion.mjs';
 import { speechConfig, synthesizeSpeech } from './cloudflare/speech.mjs';
 import express from 'express';
@@ -26,6 +29,22 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '64kb' }));
 app.use('/api', security);
 
+const dataDir = path.join(__dirname, '.data');
+fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+const stateFile = path.join(dataDir, 'music-state.json');
+let musicState = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : {};
+const persistMusic = () => { fs.writeFileSync(stateFile + '.tmp', JSON.stringify(musicState), { mode: 0o600 }); fs.renameSync(stateFile + '.tmp', stateFile); };
+if (!musicState['qq:secret']) { musicState['qq:secret'] = randomBytes(32).toString('hex'); persistMusic(); }
+const musicEnv = { ...process.env, QQ_SESSION_SECRET: process.env.QQ_SESSION_SECRET || musicState['qq:secret'] };
+const musicStore = { get: async (key: string) => musicState[key], put: async (key: string, value: unknown) => { musicState[key] = value; persistMusic(); }, delete: async (key: string) => { delete musicState[key]; persistMusic(); } };
+const webRequest = (req: express.Request) => new Request(`${req.protocol}://${req.get('host')}${req.originalUrl}`, { method: req.method, headers: { Cookie: req.headers.cookie || '', 'Content-Type': 'application/json' }, ...(['POST','PUT'].includes(req.method) ? { body: JSON.stringify(req.body) } : {}) });
+app.use('/api/music', async (req, res) => {
+  const result = await musicRoute(webRequest(req), musicEnv, musicStore);
+  result.headers.forEach((value, key) => res.setHeader(key, value));
+  res.status(result.status).send(Buffer.from(await result.arrayBuffer()));
+});
+app.get('/api/context/weather', async (req, res) => res.json(await getWeather(req.query.city)));
+
 app.get('/api/voice/config', (_req, res) => res.json(speechConfig(process.env)));
 app.post('/api/voice/synthesize', async (req, res) => {
   const controller = new AbortController();
@@ -48,7 +67,9 @@ app.post('/api/agent/chat', async (req, res) => {
   const cancel = () => controller.abort();
   res.on('close', cancel);
   try {
-    const result = await companionChat(req.body, process.env, fetch, controller.signal);
+    const music = req.body.musicSource === 'qq-music' ? await createMusicClient(webRequest(req), musicEnv, musicStore) : undefined;
+    const weather = await getWeather(req.body.profile?.city);
+    const result = await companionChat({ ...req.body, weather: weather.summary }, process.env, fetch, controller.signal, music);
     if (!res.destroyed) res.json(result);
   } finally { res.off('close', cancel); }
 });

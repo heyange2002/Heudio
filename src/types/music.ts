@@ -8,6 +8,8 @@ export interface LyricLine {
 
 export interface MusicTrack {
   id: string;
+  qqMid?: string;
+  source?: 'qq-music' | 'builtin';
   title: string;
   artist: string;
   album: string;
@@ -58,7 +60,7 @@ export interface AgentMessage {
 }
 
 export interface ServiceSettings {
-  musicSource: 'soundisle-builtin' | 'open-archive' | 'local-stems';
+  musicSource: 'soundisle-builtin' | 'qq-music';
   chatModel: 'MiniMax-M3' | 'local-heuristic';
   voiceTts: 'minimax' | 'silent';
   voiceModel: string;

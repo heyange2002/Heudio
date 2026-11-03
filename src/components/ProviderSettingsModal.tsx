@@ -67,8 +67,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {[
               { id: 'soundisle-builtin', title: '声屿内建合成源', desc: '432Hz自适应Web Audio纯净渲染' },
-              { id: 'open-archive', title: '开放知识库音频', desc: '开放知识共享环境音源与器乐流' },
-              { id: 'local-stems', title: '本地音频扩展', desc: '支持用户本地导入的分轨无损伴奏' },
+              { id: 'qq-music', title: 'QQ 音乐', desc: '扫码授权、搜索与阿屿编排歌单；在主页音乐面板配置' },
             ].map((item) => (
               <button
                 key={item.id}

@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/patch-qq-music-api.mjs",
     "dev": "tsx server.ts",
     "start": "node server.ts",
     "build": "vite build",
@@ -17,12 +18,15 @@
     "test:ui": "node tests/run-ui.mjs",
     "test:speech": "node --test tests/speech.test.mjs",
     "test:speech-runtime": "node --test tests/speech-runtime.test.mjs",
-    "test:companion": "node --test tests/companion.test.mjs"
+    "test:companion": "node --test tests/companion.test.mjs",
+    "test:music": "node --test tests/music.test.mjs tests/qr-bootstrap.test.mjs",
+    "test:music-runtime": "node --test tests/music-runtime.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "@yakult-green-tea/qq-music-api": "3.3.5",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
@@ -40,10 +44,10 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.2",
     "jsdom": "^29.1.1",
+    "miniflare": "5.20261102.0-beta",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
-    "wrangler": "^4.156.2",
-    "miniflare": "5.20261102.0-beta"
+    "wrangler": "^4.156.2"
   }
 }

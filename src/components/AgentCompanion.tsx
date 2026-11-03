@@ -63,9 +63,9 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
       <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-800/60 text-xs text-stone-400">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-amber-400" />
-          <span className="font-semibold text-stone-200">声屿 Companion Agent</span>
+          <span className="font-semibold text-stone-200">阿屿 · 你的音乐陪伴者</span>
           <span aria-hidden="true">·</span>
-          <span>适度对话陪伴</span>
+          <span>听你说，为你选歌</span>
         </div>
         <div className="flex items-center gap-2 text-stone-400 text-[11px]">
           <span>{weatherText}</span>

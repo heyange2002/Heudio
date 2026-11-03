@@ -1,6 +1,6 @@
 # 声屿 SoundIsle
 
-React 音乐伴侣：场景音乐、自然混音、文字陪伴与 MiniMax 语音输出。
+React 音乐伴侣：内置「阿屿」陪伴 Agent，通过 QQ 音乐搜索和个人推荐编排播放队列，结合时间、天气、音乐偏好与工作状态选歌，并用 MiniMax 语音交流。
 
 ## 本机运行
 
@@ -8,6 +8,7 @@ React 音乐伴侣：场景音乐、自然混音、文字陪伴与 MiniMax 语�
 
 陪伴模型使用 MiniMax M3，与 MiniMax 语音共用后端 MINIMAX_API_KEY。未配置或模型调用失败时使用规则回复；设置页显示配置状态，选择离线引擎时不调用模型。
 
+- [阿屿与 QQ 音乐配置、授权及使用](./QQ_MUSIC_AGENT.md)
 - [MiniMax 语音配置与使用](./MINIMAX_SPEECH.md)
 - [访问 Key 与 HTTPS](./SECURITY_SETUP.md)
 - [Cloudflare 部署](./CLOUDFLARE_DEPLOY.md)

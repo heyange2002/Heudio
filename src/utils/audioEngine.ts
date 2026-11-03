@@ -1,6 +1,47 @@
+import { apiFetch } from '../api';
 import { AmbientMix, MusicTrack } from '../types/music';
 
 class SoundIsleAudioEngine {
+  private remoteAudio: HTMLAudioElement | null = null;
+  private playGeneration = 0;
+  private playbackController?: AbortController;
+  private volume = 0.85;
+  private ducked = false;
+  private onStartedCallback?: (track: MusicTrack) => void;
+  public onStarted(callback: (track: MusicTrack) => void) { this.onStartedCallback = callback; }
+  private onErrorCallback?: (message: string) => void;
+  public onError(callback: (message: string) => void) { this.onErrorCallback = callback; }
+  public setSpeechDucking(active: boolean) { this.ducked = active; this.applyVolume(); }
+  private applyVolume() {
+    const volume = this.volume * (this.ducked ? 0.25 : 1);
+    if (this.remoteAudio) this.remoteAudio.volume = volume;
+    if (this.masterGain && this.ctx) this.masterGain.gain.setValueAtTime(volume, this.ctx.currentTime);
+  }
+  private async playQQTrack(track: MusicTrack, start: number, generation: number) {
+    const controller = new AbortController(); this.playbackController = controller;
+    try {
+      const response = await apiFetch('/api/music/getMusicPlay/' + encodeURIComponent(track.qqMid!) + '?quality=128', { signal: controller.signal });
+      const data = await response.json();
+      if (!response.ok) throw Error(data.error || '无法获取播放链接，请检查 QQ 授权');
+      const entry = data.data?.playUrl?.[track.qqMid!];
+      if (!entry?.url) throw Error('这首歌暂时没有可用的播放链接，可以换一首试试');
+      const url = new URL(entry.url);
+      if (url.protocol === 'http:' && /(?:^|\.)qq\.com$/.test(url.hostname)) url.protocol = 'https:';
+      if (url.protocol !== 'https:' || url.username || url.password) throw Error('音乐播放链接格式无效');
+      if (generation !== this.playGeneration) return;
+      const audio = new Audio(url.toString()); this.remoteAudio = audio;
+      audio.currentTime = start; this.applyVolume();
+      audio.ontimeupdate = () => { if (generation === this.playGeneration) { this.elapsedSeconds = audio.currentTime; this.onTimeUpdateCallback?.(audio.currentTime); } };
+      audio.onended = () => { if (generation === this.playGeneration) { this.isPlaying = false; this.onTrackEndedCallback?.(); } };
+      audio.onerror = () => { if (generation === this.playGeneration) { this.pause(); this.onErrorCallback?.('歌曲播放失败，请重试或换一首歌'); } };
+      await audio.play();
+      if (generation !== this.playGeneration) audio.pause();
+      else this.onStartedCallback?.(track);
+    } catch (error) {
+      if (generation !== this.playGeneration) return;
+      this.pause(); this.onErrorCallback?.(error instanceof Error && error.name === 'NotAllowedError' ? '歌曲已准备好，请点击播放继续' : error instanceof Error ? error.message : '歌曲播放失败');
+    }
+  }
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
@@ -255,16 +296,20 @@ class SoundIsleAudioEngine {
 
   // Set Master Volume
   public setMasterVolume(vol: number) {
-    this.initContext();
-    if (this.masterGain && this.ctx) {
-      const clamped = Math.max(0, Math.min(1, vol));
-      this.masterGain.gain.setValueAtTime(clamped, this.ctx.currentTime);
-    }
+    this.volume = Math.max(0, Math.min(1, vol)); this.applyVolume();
   }
 
   // Play track
   public playTrack(track: MusicTrack, startFromSeconds: number = 0) {
-    this.initContext();
+    this.pause();
+    if (this.remoteAudio) { this.remoteAudio.removeAttribute('src'); this.remoteAudio.load(); this.remoteAudio = null; }
+    const generation = this.playGeneration;
+    this.currentTrack = track;
+    if (track.qqMid) {
+      this.elapsedSeconds = startFromSeconds; this.isPlaying = true;
+      void this.playQQTrack(track, startFromSeconds, generation); return;
+    }
+    this.initContext(); this.applyVolume();
     this.currentTrack = track;
     this.elapsedSeconds = startFromSeconds;
     this.isPlaying = true;
@@ -291,6 +336,9 @@ class SoundIsleAudioEngine {
   }
 
   public pause() {
+    this.playGeneration++; this.playbackController?.abort();
+    this.playbackController = undefined;
+    if (this.remoteAudio) { this.remoteAudio.pause(); this.remoteAudio.ontimeupdate = null; this.remoteAudio.onended = null; this.remoteAudio.onerror = null; }
     this.isPlaying = false;
     this.stopSynthSchedule();
     if (this.trackTimer) {
@@ -307,6 +355,7 @@ class SoundIsleAudioEngine {
 
   public seek(seconds: number) {
     this.elapsedSeconds = Math.max(0, Math.min(this.currentTrack ? this.currentTrack.duration : 180, seconds));
+    if (this.remoteAudio) this.remoteAudio.currentTime = this.elapsedSeconds;
     if (this.onTimeUpdateCallback) {
       this.onTimeUpdateCallback(this.elapsedSeconds);
     }

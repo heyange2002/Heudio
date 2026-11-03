@@ -1,6 +1,6 @@
 # Cloudflare Workers 部署
 
-当前目录为 SoundIsle React/Express 伴侣应用。Workers 入口在 `cloudflare/worker.mjs`，包含 Key 登录、持久会话和 `/api/agent/chat`。它不包含之前另一目录中 Heudio 的 QQ 音乐网关；不能把本次部署当作 QQ Node 服务迁移完成。
+当前目录为 SoundIsle React/Express 伴侣应用。Workers 入口在 `cloudflare/worker.mjs`，包含 Key 登录、持久会话、阿屿 Agent、QQ 音乐内置 API 与 MiniMax 语音。配置与授权见 [QQ 音乐 Agent](./QQ_MUSIC_AGENT.md)。
 
 ## 结构
 
@@ -43,7 +43,7 @@ npx wrangler secret put MINIMAX_API_KEY
 
 本地 `.env` 的密钥不会自动上传到 Cloudflare。Cloudflare 账户须有 Workers、Durable Objects 权限；运行费用和配额取决于账户套餐。不要使用未授权的临时账户代替用户账户发布。
 
-QQ Music API 的 Node MQTT 登录不能随本目录直接上线。若需要 QQ 网关一并迁移，要单独适配它的 serverless 入口、会话和可用扫码通道。
+内置 QQ API 使用 serverless 入口和手机 QQ 网页扫码 / 微信扫码。QQ 音乐 App 的 MQTT 登录可通过自建 Node 网关使用；当前未配置 MQTT 中继。
 
 ## 本次发布结果（2026-11-03）
 
@@ -85,3 +85,10 @@ Express 与 Workers 共用 `cloudflare/companion.mjs`，使用 MiniMax 国内 Op
 与语音共用 `MINIMAX_API_KEY`，无需额外 Gemini 配置。用户输入会发送给 MiniMax，按用量计费。密钥保留在后端，不写入前端或源码。接口参考：https://platform.minimax.cn/docs/api-reference/text-openai-api 。
 
 本次核查线上没有 Gemini 配置，已有 MiniMax Key；使用现有 Key 对 M3 的一次真实请求成功返回 `mode=model`。已发布版本 `c54004dc-c573-4ef3-a76c-7f01b06899e1`，Cloudflare 控制面确认 100% 流量，线上代码包含 M3 与配置检查接口。类型检查、生产构建、Worker 打包及25项回归检查通过。当前网络访问 workers.dev 超时，尚未完成线上页面端到端验证。
+
+
+## 阿屿与 QQ 音乐（2026-11-03）
+
+发布版本 `f778ab3a-ecfd-40a7-a0f6-cd7de1af7213`，控制面确认100%流量，已建立 MUSIC / MusicStore Durable Object。包括人设、近期上下文与偏好、真实天气、音乐工具调用、QQ配置/授权/搜索/个人曲库、实际音频播放和模型回复后的语音输出；移除底部设计守则区。
+
+36项自动检查、类型检查、构建与Worker打包通过。已真实验证模型回复后请求语音，返回200 audio/mpeg、73716字节；实际获取QQ和微信二维码。本机浏览器确认QQ二维码可见。QQ音乐上游 `u.y.qq.com` 当前网络连接重置，尚未验证完整扫码授权和实际账号歌曲取链；不将此状态视作授权成功。

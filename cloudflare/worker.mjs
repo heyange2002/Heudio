@@ -1,3 +1,7 @@
+import { musicRoute, createMusicClient } from './music.mjs';
+import { remoteMusicStore, musicEnvironment } from './music-store.mjs';
+import { getWeather } from './context.mjs';
+export { MusicStore } from './music-store.mjs';
 import { companionChat, companionConfig } from './companion.mjs';
 import { speechConfig, synthesizeSpeech } from './speech.mjs';
 export { AuthStore } from './auth.mjs';
@@ -11,7 +15,7 @@ export default {
   if(request.headers.get('X-Soundisle-Client')!=='web')return json({error:'请求来源无效'},403);
   const origin=request.headers.get('Origin');
   if(origin&&origin!==url.origin)return json({error:'请使用后端同域页面登录'},403);
-  if(!['/api/auth/session','/api/agent/chat','/api/agent/config','/api/voice/config','/api/voice/synthesize'].includes(url.pathname))return json({error:'接口不存在'},404);
+  if(!url.pathname.startsWith('/api/music/')&&url.pathname!=='/api/context/weather'&&!['/api/auth/session','/api/agent/chat','/api/agent/config','/api/voice/config','/api/voice/synthesize'].includes(url.pathname))return json({error:'接口不存在'},404);
   try{
    if(['POST','PUT','PATCH'].includes(request.method)){
     if(!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'请使用 JSON 请求'},415);
@@ -25,13 +29,23 @@ export default {
    const check=await auth.fetch(new Request(new URL('/api/auth/session',url),{headers:request.headers}));
    if(!check.ok)return check;
    if(!(await check.json()).authenticated)return json({error:'请先输入访问 Key'},401);
+   if(url.pathname.startsWith('/api/music/')) {
+    const store=remoteMusicStore(env);
+    return musicRoute(request,await musicEnvironment(env,store),store);
+   }
+   if(url.pathname==='/api/context/weather')return request.method==='GET'?json(await getWeather(url.searchParams.get('city'))):json({error:'方法不支持'},405);
    if(url.pathname==='/api/agent/config')return request.method==='GET'?json(companionConfig(env)):json({error:'方法不支持'},405);
    if(url.pathname==='/api/voice/config')return request.method==='GET'?json(speechConfig(env)):json({error:'方法不支持'},405);
    if(request.method!=='POST')return json({error:'方法不支持'},405);
    const body=await request.json();
    if(url.pathname==='/api/voice/synthesize')return synthesizeSpeech(body,env,fetch,request.signal);
    if(typeof body.message!=='string'||!body.message.trim()||body.message.length>8000)return json({error:'消息长度应为 1～8000 字符'},400);
-   return json(await companionChat(body,env,fetch,request.signal));
+   let music;
+   if(env.MUSIC&&body.musicSource==='qq-music') {
+    const store=remoteMusicStore(env);music=await createMusicClient(request,await musicEnvironment(env,store),store);
+   }
+   const weather=await getWeather(body.profile?.city);
+   return json(await companionChat({...body,weather:weather.summary},env,fetch,request.signal,music));
   }catch{return json({error:'请求格式无效或服务暂时不可用'},400);}
  }
 };

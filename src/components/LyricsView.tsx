@@ -59,6 +59,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
         ref={containerRef}
         className="flex-1 overflow-y-auto space-y-4 pr-2 scrollbar-thin scrollbar-thumb-stone-800 select-none py-4"
       >
+        {!lyrics.length && <p className="text-sm text-stone-500 p-3">这首歌暂无可用歌词，安心听音乐就好。</p>}
         {lyrics.map((line, idx) => {
           const isActive = idx === activeIndex;
           const isPassed = idx < activeIndex;
