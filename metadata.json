@@ -1,0 +1,6 @@
+{
+  "name": "声屿 SoundIsle",
+  "description": "一个理解用户当下需求，用音乐与适度对话提供陪伴的智能音乐应用。支持场景感知、音频律动、实时歌词与自由控制。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

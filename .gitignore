@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+.aistudio/
+*.log
+.env*
+!.env.example
+
+.wrangler/
+.dev.vars*
+!.dev.vars.example
