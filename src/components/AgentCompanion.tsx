@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AgentMessage, SceneMode } from '../types/music';
-import { Send, Sparkles, Volume2, ArrowRight, CornerDownLeft, RefreshCw, Sliders } from 'lucide-react';
+import { Send, Sparkles, Volume2, ArrowRight, CornerDownLeft, RefreshCw, Sliders, Square, LoaderCircle, Play } from 'lucide-react';
+import type { SpeechState } from '../utils/speechPlayer';
 
 interface AgentCompanionProps {
   messages: AgentMessage[];
@@ -11,6 +12,8 @@ interface AgentCompanionProps {
   weatherText: string;
   timeContextText: string;
   onSpeakMessage?: (text: string) => void;
+  speechState?: SpeechState;
+  onStopSpeech?: () => void;
 }
 
 const PRESET_INTENTS = [
@@ -37,6 +40,8 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
   weatherText,
   timeContextText,
   onSpeakMessage,
+  speechState,
+  onStopSpeech,
 }) => {
   const [inputText, setInputText] = useState('');
 
@@ -73,6 +78,9 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
       <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin scrollbar-thumb-stone-800 py-1">
         {messages.map((msg) => {
           const isAgent = msg.role === 'agent';
+          const speechStatus = speechState?.text === msg.content ? speechState.status : 'idle';
+          const active = speechStatus === 'loading' || speechStatus === 'playing';
+          const speechLabel = speechStatus === 'loading' ? '取消语音生成' : speechStatus === 'playing' ? '停止朗读' : speechStatus === 'ready' ? '播放语音' : '语音朗读陪伴';
           return (
             <div
               key={msg.id}
@@ -92,11 +100,12 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
                   {isAgent && onSpeakMessage && (
                     <button
                       onClick={() => onSpeakMessage(msg.content)}
-                      title="语音朗读陪伴"
-                      aria-label="语音朗读陪伴"
+                      title={speechLabel}
+                      aria-label={speechLabel}
+                      aria-pressed={active}
                       className="text-stone-400 hover:text-amber-300 p-0.5 rounded transition-colors"
                     >
-                      <Volume2 className="w-3.5 h-3.5" />
+                      {speechStatus === 'loading' ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : active ? <Square className="w-3.5 h-3.5" /> : speechStatus === 'ready' ? <Play className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
                     </button>
                   )}
                 </div>
@@ -159,6 +168,13 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
           ))}
         </div>
       </div>
+
+      {speechState && speechState.status !== 'idle' && (
+        <div role="status" aria-live="polite" className="flex items-center justify-between gap-2 mt-2 text-xs text-stone-400">
+          <span>{speechState.error || (speechState.status === 'loading' ? '正在生成 MiniMax 语音…' : 'MiniMax 正在朗读 · AI 合成声音')}</span>
+          {(speechState.status === 'playing' || speechState.status === 'loading' || speechState.status === 'ready') && <button type="button" onClick={onStopSpeech} className="shrink-0 text-amber-300">{speechState.status === 'loading' ? '取消' : '停止'}</button>}
+        </div>
+      )}
 
       {/* Input Box */}
       <form onSubmit={handleSubmit} className="relative mt-2">

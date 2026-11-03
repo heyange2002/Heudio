@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { apiFetch } from '../api';
+import { SPEECH_MODELS, SPEECH_VOICES } from '../../shared/speech.mjs';
 import { ServiceSettings } from '../types/music';
 import { X, Server, Cpu, Mic, Sliders, ShieldCheck } from 'lucide-react';
 
@@ -15,6 +17,25 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
   settings,
   onUpdateSettings,
 }) => {
+  const [modelStatus, setModelStatus] = useState('正在检查陪伴模型…');
+  const [voiceStatus, setVoiceStatus] = useState('正在检查语音服务…');
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    setModelStatus('正在检查陪伴模型…');
+    apiFetch('/api/agent/config', { signal: controller.signal }).then(async response => {
+      if (!response.ok) throw Error();
+      const config = await response.json();
+      if (!controller.signal.aborted) setModelStatus(config.configured ? 'MiniMax M3 已配置' : '尚未配置陪伴模型，当前使用规则回复');
+    }).catch(() => { if (!controller.signal.aborted) setModelStatus('暂时无法确认陪伴模型状态，请检查连接'); });
+    setVoiceStatus('正在检查语音服务…');
+    apiFetch('/api/voice/config', { signal: controller.signal }).then(async response => {
+      if (!response.ok) throw Error();
+      const config = await response.json();
+      if (!controller.signal.aborted) setVoiceStatus(config.configured ? 'MiniMax 已配置 · AI 合成声音' : '尚未配置语音服务，请在后端设置 MiniMax API Key');
+    }).catch(() => { if (!controller.signal.aborted) setVoiceStatus('暂时无法确认语音服务状态，请检查连接'); });
+    return () => controller.abort();
+  }, [isOpen]);
   if (!isOpen) return null;
 
   return (
@@ -73,8 +94,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {[
-              { id: 'gemini-3.8-flash', title: 'Gemini 3.8 Flash', desc: '推荐 · 极速场景感知与轻量陪伴' },
-              { id: 'gemini-4-argon', title: 'Gemini 4 Argon', desc: '深度情感共鸣与复杂长周期推导' },
+              { id: 'MiniMax-M3', title: 'MiniMax M3', desc: '场景感知与温暖文字陪伴' },
               { id: 'local-heuristic', title: '离线启发式引擎', desc: '本地零延迟，无网络时安全保障' },
             ].map((item) => (
               <button
@@ -93,21 +113,22 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
           </div>
         </div>
 
+        <p role="status" className="text-[11px] text-stone-400">{modelStatus}</p>
+
         {/* 3. Voice TTS Provider */}
         <div className="space-y-2.5">
           <label className="text-xs font-semibold text-stone-300 flex items-center gap-2">
             <Mic className="w-4 h-4 text-amber-400" />
             <span>语音陪伴服务 (Voice Speech Service)</span>
           </label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {[
-              { id: 'browser-speech', title: '系统本地语音', desc: '零网络消耗，原生低延迟朗读' },
-              { id: 'gemini-tts', title: 'Gemini Flash TTS', desc: '温和自然多模态情感声学表达' },
+              { id: 'minimax', title: 'MiniMax 自然语音', desc: '温暖陪伴，支持音色与语速选择' },
               { id: 'silent', title: '静音文字模式', desc: '仅保留气泡文本，无语音播报' },
             ].map((item) => (
               <button
                 key={item.id}
-                onClick={() => onUpdateSettings({ voiceTts: item.id as any })}
+                onClick={() => onUpdateSettings({ voiceTts: item.id as ServiceSettings['voiceTts'] })}
                 className={`p-3 rounded-xl border text-left transition-all ${
                   settings.voiceTts === item.id
                     ? 'bg-amber-400/10 border-amber-400/80 text-stone-100 shadow-sm'
@@ -119,6 +140,28 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
               </button>
             ))}
           </div>
+          {settings.voiceTts === 'minimax' && (
+            <div className="space-y-3 p-3 bg-stone-800/40 rounded-xl border border-stone-800 text-xs text-stone-300">
+              <p role="status" className="text-stone-400">{voiceStatus}</p>
+              <label className="block">陪伴音色
+                <select aria-label="陪伴音色" value={settings.voiceId} onChange={e => onUpdateSettings({ voiceId: e.target.value })} className="mt-1 w-full p-2 rounded-lg bg-stone-900 border border-stone-700">
+                  {SPEECH_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                </select>
+              </label>
+              <label className="block">声音质量
+                <select aria-label="声音质量" value={settings.voiceModel} onChange={e => onUpdateSettings({ voiceModel: e.target.value })} className="mt-1 w-full p-2 rounded-lg bg-stone-900 border border-stone-700">
+                  {SPEECH_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+                </select>
+              </label>
+              <label className="block">朗读语速 · {settings.voiceSpeed.toFixed(2)} 倍
+                <input aria-label="朗读语速" type="range" min="0.8" max="1.2" step="0.05" value={settings.voiceSpeed} onChange={e => onUpdateSettings({ voiceSpeed: Number(e.target.value) })} className="mt-2 w-full accent-amber-400" />
+              </label>
+              <label className="flex items-center justify-between gap-2">自动朗读新回复
+                <input type="checkbox" checked={settings.voiceAutoPlay} onChange={e => onUpdateSettings({ voiceAutoPlay: e.target.checked })} className="accent-amber-400" />
+              </label>
+              <p className="text-[11px] text-stone-400">朗读的文字会发送至 MiniMax，按用量计费。也可关闭自动朗读，点击消息旁的喇叭按需收听。</p>
+            </div>
+          )}
         </div>
 
         {/* 4. User Playback Control Toggles */}

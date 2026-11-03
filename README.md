@@ -1,20 +1,15 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 声屿 SoundIsle
 
-# Run and deploy your AI Studio app
+React 音乐伴侣：场景音乐、自然混音、文字陪伴与 MiniMax 语音输出。
 
-This contains everything you need to run your app locally.
+## 本机运行
 
-View your app in AI Studio: https://ai.studio/apps/6b071c67-10cb-4259-8587-9dee706230e5
+需要 Node.js。安装依赖 `npm ci`，复制 `.env.example` 为 `.env`，设置至少32字符的 `APP_ACCESS_KEY`，运行 `npm run dev`。默认访问 http://127.0.0.1:3000 并使用访问 Key 解锁。
 
-## Run Locally
+陪伴模型使用 MiniMax M3，与 MiniMax 语音共用后端 MINIMAX_API_KEY。未配置或模型调用失败时使用规则回复；设置页显示配置状态，选择离线引擎时不调用模型。
 
-**Prerequisites:**  Node.js
+- [MiniMax 语音配置与使用](./MINIMAX_SPEECH.md)
+- [访问 Key 与 HTTPS](./SECURITY_SETUP.md)
+- [Cloudflare 部署](./CLOUDFLARE_DEPLOY.md)
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+密钥应保存在被忽略的环境文件或 Cloudflare Secrets 中，不进入前端源码。

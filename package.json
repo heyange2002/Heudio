@@ -13,8 +13,11 @@
     "test:security": "node --test tests/security.test.mjs",
     "cf:dev": "wrangler dev",
     "cf:check": "npm run build && wrangler deploy --dry-run",
-    "cf:deploy": "npm run build && wrangler deploy",
-    "test:ui": "node tests/run-ui.mjs"
+    "cf:deploy": "npm run build && wrangler deploy --keep-vars",
+    "test:ui": "node tests/run-ui.mjs",
+    "test:speech": "node --test tests/speech.test.mjs",
+    "test:speech-runtime": "node --test tests/speech-runtime.test.mjs",
+    "test:companion": "node --test tests/companion.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -40,6 +43,7 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
-    "wrangler": "^4.156.2"
+    "wrangler": "^4.156.2",
+    "miniflare": "5.20261102.0-beta"
   }
 }

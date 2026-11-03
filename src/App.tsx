@@ -1,6 +1,8 @@
 import { workspaceView, type AppSection } from './utils/navigation';
 import { apiFetch } from './api';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { DEFAULT_SPEECH } from '../shared/speech.mjs';
+import { SpeechPlayer, type SpeechState } from './utils/speechPlayer';
 import {
   MusicTrack,
   SceneMode,
@@ -48,13 +50,34 @@ export default function App() {
   // User controls & providers
   const [settings, setSettings] = useState<ServiceSettings>({
     musicSource: 'soundisle-builtin',
-    chatModel: 'gemini-3.8-flash',
-    voiceTts: 'browser-speech',
+    chatModel: 'MiniMax-M3',
+    voiceTts: 'minimax',
+    voiceModel: DEFAULT_SPEECH.model,
+    voiceId: DEFAULT_SPEECH.voiceId,
+    voiceSpeed: DEFAULT_SPEECH.speed,
+    voiceAutoPlay: true,
     autoAdvance: true,
     motionEnabled: true,
     pureMusicMode: false,
     sleepTimerMinutes: null,
   });
+
+  const [speechState, setSpeechState] = useState<SpeechState>({ status: 'idle', text: '' });
+  const speechPlayer = useMemo(() => new SpeechPlayer(setSpeechState), []);
+  const speechMounted = useRef(false);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  useEffect(() => {
+    speechPlayer.stop();
+  }, [speechPlayer, settings.voiceTts, settings.voiceModel, settings.voiceId, settings.voiceSpeed, settings.voiceAutoPlay, settings.pureMusicMode]);
+  useEffect(() => {
+    speechMounted.current = true;
+    return () => { speechMounted.current = false; speechPlayer.stop(); };
+  }, [speechPlayer]);
+  const autoSpeak = (text: string) => {
+    const latest = settingsRef.current;
+    if (speechMounted.current && latest.voiceTts === 'minimax' && latest.voiceAutoPlay && !latest.pureMusicMode) void speechPlayer.speak(text, latest);
+  };
 
   // Agent chat state
   const [messages, setMessages] = useState<AgentMessage[]>([
@@ -216,6 +239,7 @@ export default function App() {
 
   // Agent message handling via server API with fallback
   const handleSendMessage = async (text: string) => {
+    speechPlayer.stop();
     const userMsg: AgentMessage = {
       id: String(Date.now()),
       role: 'user',
@@ -228,12 +252,13 @@ export default function App() {
 
     try {
       let resultData;
-      // If server route is active, call backend Gemini endpoint
+      // Send the selected engine to the backend.
       const response = await apiFetch('/api/agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          chatModel: settings.chatModel,
           currentScene,
           currentTrack: currentTrack.title,
           weather: weatherText,
@@ -286,10 +311,7 @@ export default function App() {
         handleAmbientMixChange(resultData.ambientAdjustments);
       }
 
-      // Voice read-out if browser speech enabled
-      if (settings.voiceTts === 'browser-speech' && 'speechSynthesis' in window) {
-        handleSpeak(resultData.reply);
-      }
+      autoSpeak(resultData.reply);
     } catch (e) {
       console.error('Agent chat error:', e);
       // Fallback
@@ -305,19 +327,19 @@ export default function App() {
           quickActions: fallback.suggestedFollowUps,
         },
       ]);
+      autoSpeak(fallback.reply);
     } finally {
       setIsLoadingAgent(false);
     }
   };
 
   const handleSpeak = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-CN';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.0;
-    window.speechSynthesis.speak(utterance);
+    if (settings.voiceTts === 'silent') return;
+    if (speechPlayer.state.text === text) {
+      if (speechPlayer.state.status === 'ready') { void speechPlayer.resume(); return; }
+      if (['loading', 'playing'].includes(speechPlayer.state.status)) { speechPlayer.stop(); return; }
+    }
+    void speechPlayer.speak(text, settings);
   };
 
   return (
@@ -440,7 +462,9 @@ export default function App() {
                 currentScene={currentScene}
                 weatherText={weatherText}
                 timeContextText={timeContextText}
-                onSpeakMessage={handleSpeak}
+                onSpeakMessage={settings.voiceTts === 'silent' ? undefined : handleSpeak}
+                speechState={speechState}
+                onStopSpeech={() => speechPlayer.stop()}
               />
 
               {/* Natural sound ambient indicator banner */}

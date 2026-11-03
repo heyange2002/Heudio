@@ -59,8 +59,12 @@ export interface AgentMessage {
 
 export interface ServiceSettings {
   musicSource: 'soundisle-builtin' | 'open-archive' | 'local-stems';
-  chatModel: 'gemini-3.8-flash' | 'gemini-4-argon' | 'local-heuristic';
-  voiceTts: 'gemini-tts' | 'browser-speech' | 'silent';
+  chatModel: 'MiniMax-M3' | 'local-heuristic';
+  voiceTts: 'minimax' | 'silent';
+  voiceModel: string;
+  voiceId: string;
+  voiceSpeed: number;
+  voiceAutoPlay: boolean;
   autoAdvance: boolean; // "限制自动切歌"
   motionEnabled: boolean; // "关闭动效"
   pureMusicMode: boolean; // "只听音乐"
