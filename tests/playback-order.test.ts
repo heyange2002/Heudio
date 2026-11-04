@@ -33,3 +33,19 @@ test('playback modes cycle predictably and invalid stored preferences restore th
  assert.equal(nextPlaybackMode('sequential'),'shuffle');assert.equal(nextPlaybackMode('shuffle'),'repeat-one');assert.equal(nextPlaybackMode('repeat-one'),'sequential');
  assert.equal(normalizePlaybackMode('shuffle'),'shuffle');assert.equal(normalizePlaybackMode('invalid'),'sequential');
 });
+
+test('preloading reserves the actual shuffle successor without advancing history, including at round boundaries', () => {
+ const ids = ['a', 'b', 'c', 'd']; const order = new PlaybackOrder(() => 0.37); let current = 0;
+ for (let i = 0; i < 20; i++) {
+  const next = order.peek(ids, current, 'shuffle');
+  assert.notEqual(next, current); assert.equal(order.peek(ids, current, 'shuffle'), next);
+  assert.equal(order.select(ids, current, 'shuffle', i % 2 ? 'next' : 'ended'), next);
+  assert.equal(order.select(ids, next, 'shuffle', 'previous'), current);
+  current = order.select(ids, current, 'shuffle', 'next');
+ }
+ assert.equal(order.peek(ids, current, 'repeat-one'), current);
+ assert.equal(order.select(ids, current, 'repeat-one', 'next'), (current + 1) % ids.length);
+ order.peek(ids, current, 'shuffle');
+ assert.equal(order.select(['x','y'], 0, 'shuffle', 'ended'), 1);
+ assert.equal(order.peek(['x','y'], 1, 'sequential'), 0);
+});

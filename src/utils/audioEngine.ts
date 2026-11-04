@@ -6,6 +6,7 @@ export class SoundIsleAudioEngine {
   private remoteAudio: HTMLAudioElement | null = null;
   private playGeneration = 0;
   private playbackController?: AbortController;
+  private preloaded?: { mid: string; controller: AbortController; ready: Promise<HTMLAudioElement | null>; audio?: HTMLAudioElement; createdAt: number };
   private volume = 0.85;
   private ducked = false;
   private inputMuted = false;
@@ -61,14 +62,41 @@ export class SoundIsleAudioEngine {
     this.headroom?.gain.setTargetAtTime(Math.pow(10, -(enabled ? Math.max(0, ...gains) : 0) / 20), this.ctx.currentTime, 0.03);
   }
   public setMasterVolume(vol: number) { this.volume = Math.max(0, Math.min(1, vol)); this.applyVolume(); }
+  private releaseAudio(audio: HTMLAudioElement) {
+    audio.pause(); audio.ontimeupdate = null; audio.onended = null; audio.onerror = null;
+    audio.removeAttribute('src'); audio.load();
+  }
+  public clearPreload() {
+    const saved = this.preloaded; this.preloaded = undefined;
+    saved?.controller.abort();
+    if (saved?.audio) this.releaseAudio(saved.audio);
+  }
+  public preloadTrack(track: MusicTrack | null) {
+    if (!track?.qqMid) { this.clearPreload(); return; }
+    if (this.preloaded?.mid === track.qqMid && Date.now() - this.preloaded.createdAt < 25 * 60000) return;
+    this.clearPreload();
+    const controller = new AbortController();
+    const saved = { mid: track.qqMid, controller, createdAt: Date.now(), audio: undefined as HTMLAudioElement | undefined, ready: Promise.resolve(null) as Promise<HTMLAudioElement | null> };
+    this.preloaded = saved;
+    saved.ready = this.playbackUrl(track, controller.signal).then(url => {
+      if (controller.signal.aborted) return null;
+      const audio = new Audio(url); saved.audio = audio;
+      audio.preload = 'auto'; audio.load();
+      return audio;
+    }).catch(() => null); // A speculative failure must never interrupt the current song.
+  }
   public playTrack(track: MusicTrack, start = 0) {
+    const saved = this.preloaded;
+    const prepared = saved && saved.mid === track.qqMid && Date.now() - saved.createdAt < 25 * 60000 ? saved : undefined;
+    if (prepared) this.preloaded = undefined;
+    else this.clearPreload();
     this.pause();
     this.mediaSource?.disconnect(); this.mediaSource = null;
-    if (this.remoteAudio) { this.remoteAudio.removeAttribute('src'); this.remoteAudio.load(); this.remoteAudio = null; }
+    if (this.remoteAudio) { this.releaseAudio(this.remoteAudio); this.remoteAudio = null; }
     if (!track.qqMid) { this.onErrorCallback?.('请先让阿屿选歌，或在音乐侧栏选择一首 QQ 音乐。'); return; }
     this.initContext();
     this.currentTrack = track; this.elapsedSeconds = start; this.isPlaying = true;
-    void this.playQQTrack(track, start, this.playGeneration);
+    void this.playQQTrack(track, start, this.playGeneration, prepared);
   }
   public pause() {
     this.playGeneration++; this.playbackController?.abort(); this.playbackController = undefined;
@@ -87,33 +115,46 @@ export class SoundIsleAudioEngine {
   public getElapsedSeconds() { return this.elapsedSeconds; }
   public onTimeUpdate(callback: (seconds: number) => void) { this.onTimeUpdateCallback = callback; }
   public onTrackEnded(callback: () => void) { this.onTrackEndedCallback = callback; }
-  private async playQQTrack(track: MusicTrack, start: number, generation: number) {
-    const controller = new AbortController(); this.playbackController = controller;
+  private async playbackUrl(track: MusicTrack, signal: AbortSignal) {
+    const response = await apiFetch('/api/music/getMusicPlay/' + encodeURIComponent(track.qqMid!) + '?quality=128', { signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]) });
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || '无法获取播放链接，请检查 QQ 授权');
+    const entry = data.data?.playUrl?.[track.qqMid!];
+    if (!entry?.url) throw Error('这首歌暂时没有可用的播放链接，可以换一首试试');
+    const url = new URL(entry.url, location.href);
+    if (url.origin !== location.origin || !/^\/api\/music\/stream\/[a-f0-9]{48}$/.test(url.pathname) || url.search || url.hash) throw Error('音乐服务仍在返回旧版播放链接，请更新后端后重试');
+    return url.toString();
+  }
+  private async playQQTrack(track: MusicTrack, start: number, generation: number, prepared?: NonNullable<SoundIsleAudioEngine['preloaded']>) {
+    const controller = prepared?.controller || new AbortController(); this.playbackController = controller;
+    let audio: HTMLAudioElement | null = null;
     try {
-      const response = await apiFetch('/api/music/getMusicPlay/' + encodeURIComponent(track.qqMid!) + '?quality=128', { signal: controller.signal });
-      const data = await response.json();
-      if (!response.ok) throw Error(data.error || '无法获取播放链接，请检查 QQ 授权');
-      const entry = data.data?.playUrl?.[track.qqMid!];
-      if (!entry?.url) throw Error('这首歌暂时没有可用的播放链接，可以换一首试试');
-      const url = new URL(entry.url, location.href);
-      if (url.origin !== location.origin || !/^\/api\/music\/stream\/[a-f0-9]{48}$/.test(url.pathname) || url.search || url.hash) throw Error('音乐服务仍在返回旧版播放链接，请更新后端后重试');
+      if (prepared) audio = await prepared.ready;
+      if (generation !== this.playGeneration) { if (audio) this.releaseAudio(audio); return; }
+      if (!audio || audio.error) {
+        if (audio) this.releaseAudio(audio);
+        const url = await this.playbackUrl(track, controller.signal);
+        if (generation !== this.playGeneration) return;
+        audio = new Audio(url);
+      }
       if (generation !== this.playGeneration) return;
-      const audio = new Audio(url.toString()); this.remoteAudio = audio;
-      audio.currentTime = start;
+      const activeAudio = audio;
+      this.remoteAudio = activeAudio;
+      activeAudio.currentTime = start;
       if (this.ctx && this.filters.length) {
-        this.mediaSource = this.ctx.createMediaElementSource(audio);
+        this.mediaSource = this.ctx.createMediaElementSource(activeAudio);
         this.mediaSource.connect(this.filters[0]);
       }
       this.applyVolume();
-      audio.ontimeupdate = () => { if (generation === this.playGeneration) { this.elapsedSeconds = audio.currentTime; this.onTimeUpdateCallback?.(audio.currentTime); } };
-      audio.onended = () => { if (generation === this.playGeneration) { this.isPlaying = false; this.onTrackEndedCallback?.(); } };
-      audio.onerror = () => { if (generation === this.playGeneration) {
-        const code = audio.error?.code;
+      activeAudio.ontimeupdate = () => { if (generation === this.playGeneration) { this.elapsedSeconds = activeAudio.currentTime; this.onTimeUpdateCallback?.(activeAudio.currentTime); } };
+      activeAudio.onended = () => { if (generation === this.playGeneration) { this.isPlaying = false; this.onTrackEndedCallback?.(); } };
+      activeAudio.onerror = () => { if (generation === this.playGeneration) {
+        const code = activeAudio.error?.code;
         this.pause();
         this.onErrorCallback?.(code === 3 ? '浏览器无法解码这首歌的音频，请换一首歌' : '音乐下载连接失败，请重试以重新获取可用的 HTTPS 播放线路');
       } };
-      await audio.play();
-      if (generation !== this.playGeneration) audio.pause();
+      await activeAudio.play();
+      if (generation !== this.playGeneration) activeAudio.pause();
       else this.onStartedCallback?.(track);
     } catch (error) {
       if (generation !== this.playGeneration) return;

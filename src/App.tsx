@@ -17,6 +17,7 @@ import { EMPTY_TRACK } from './data/sceneThemes';
 import { DEFAULT_EQ, normalizeEqualizer, type EqualizerSettings } from './utils/equalizer';
 import { audioEngine } from './utils/audioEngine';
 import { PlaybackOrder, normalizePlaybackMode, nextPlaybackMode } from './utils/playbackOrder';
+import { PLAYBACK_SESSION_KEY, restorePlaybackSession, trackSong } from './utils/playbackSession';
 import { TopBar } from './components/TopBar';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { LyricsView } from './components/LyricsView';
@@ -25,11 +26,12 @@ import { PlayerControls } from './components/PlayerControls';
 import { EqualizerDrawer } from './components/EqualizerDrawer';
 import { ProviderSettingsModal } from './components/ProviderSettingsModal';
 export default function App() {
-  const [tracks, setTracks] = useState<MusicTrack[]>([EMPTY_TRACK]);
-  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [restored] = useState(() => restorePlaybackSession(readLocal(PLAYBACK_SESSION_KEY, null)));
+  const [tracks, setTracks] = useState<MusicTrack[]>(restored.tracks);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(restored.currentTrackIndex);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [currentScene, setCurrentScene] = useState<SceneMode>('focus');
+  const [currentTime, setCurrentTime] = useState(restored.currentTime);
+  const [currentScene, setCurrentScene] = useState<SceneMode>(restored.scene);
   const [volume, setVolume] = useState(0.85);
 
   const [equalizer, setEqualizer] = useState<EqualizerSettings>(() => normalizeEqualizer(readLocal('soundisle:eq', DEFAULT_EQ)));
@@ -89,8 +91,8 @@ export default function App() {
 
   const [profile, setProfile] = useState<Profile>(() => readLocal('soundisle:profile', { name: '', city: '', preferences: '', workState: '未知' }));
   const [listeningHistory, setListeningHistory] = useState<QQSong[]>(() => readLocal('soundisle:listening', []));
-  const [qqQueue, setQqQueue] = useState<QQSong[]>([]);
-  const [queueTitle, setQueueTitle] = useState('阿屿为你选的歌');
+  const [qqQueue, setQqQueue] = useState<QQSong[]>(restored.queue);
+  const [queueTitle, setQueueTitle] = useState(restored.title);
   const [musicError, setMusicError] = useState('');
   const [agentStatus, setAgentStatus] = useState('');
   const chatController = useRef<AbortController | null>(null);
@@ -115,11 +117,34 @@ export default function App() {
       const song = { mid: track.qqMid, title: track.title, artist: track.artist, album: track.album, duration: track.duration, coverUrl: track.coverUrl };
       setListeningHistory(prev => [...prev.filter(s => s.mid !== song.mid), song].slice(-15));
     } });
-    return () => { chatController.current?.abort(); audioEngine.pause(); audioEngine.onError(() => {}); audioEngine.onStarted(() => {}); };
+    return () => { chatController.current?.abort(); audioEngine.pause(); audioEngine.clearPreload(); audioEngine.onError(() => {}); audioEngine.onStarted(() => {}); audioEngine.onTimeUpdate(() => {}); audioEngine.onTrackEnded(() => {}); };
   }, []);
   useEffect(() => { audioEngine.setSpeechDucking(speechState.status === 'playing'); return () => audioEngine.setSpeechDucking(false); }, [speechState.status]);
   const currentTrack = tracks[currentTrackIndex] || EMPTY_TRACK;
   const view = settings.pureMusicMode ? 'music' : 'companion';
+
+  const session = useMemo(() => ({ songs: tracks.filter(track => track.qqMid).map(trackSong),
+    queue: qqQueue, title: queueTitle, currentMid: currentTrack.qqMid, scene: currentScene,
+  }), [tracks, qqQueue, queueTitle, currentTrack.qqMid, currentScene]);
+  const sessionRef = useRef({ ...session, position: currentTime });
+  sessionRef.current = { ...session, position: currentTime };
+  const savedSecond = Math.floor(currentTime);
+  useEffect(() => { saveLocal(PLAYBACK_SESSION_KEY, sessionRef.current); }, [session, savedSecond]);
+  useEffect(() => {
+    const save = () => saveLocal(PLAYBACK_SESSION_KEY, sessionRef.current);
+    window.addEventListener('pagehide', save);
+    document.addEventListener('visibilitychange', save);
+    return () => { save(); window.removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', save); };
+  }, []);
+
+  const preloadContext = JSON.stringify([tracks.map(track => track.id), currentTrackIndex, settings.playbackMode]);
+  useEffect(() => { audioEngine.clearPreload(); }, [preloadContext]);
+  useEffect(() => {
+    if (!currentTrack.qqMid) { audioEngine.clearPreload(); return; }
+    if (!isPlaying || currentTrack.duration <= 0 || currentTime < currentTrack.duration * 0.5) return;
+    const nextIndex = playbackOrder.current.peek(tracks.map(track => track.id), currentTrackIndex, settings.playbackMode);
+    audioEngine.preloadTrack(tracks[nextIndex]);
+  }, [tracks, currentTrackIndex, currentTime, isPlaying, settings.playbackMode]);
 
   // Sync audio engine callbacks
   useEffect(() => {
@@ -195,7 +220,7 @@ export default function App() {
 
   const handleSeek = (sec: number) => {
     setCurrentTime(sec);
-    audioEngine.seek(sec);
+    if (isPlaying) audioEngine.seek(sec);
   };
 
   const handleVolumeChange = (vol: number) => {

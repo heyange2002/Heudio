@@ -83,3 +83,11 @@ EC2、16GB gp3 EBS、固定 IPv4、S3、CloudFront 流量会按 AWS 账户费率
 ## 2026-11-04 查询结果播放图标
 
 查询结果右侧的“播放”文字改为与队列一致的三角图标，固定图标和封面宽度，歌曲信息独立截断，保留歌曲级播放标签与整行点击行为。类型检查、构建，以及本地/线上997px和390px浏览器检查通过。仅更新前端；发布包为 `releases/play-icons-20261104.tar.gz`，回滚包为 `/var/backups/soundisle/before-play-icons.tar.gz`。
+
+## 2026-11-04 歌单恢复与下一首预加载
+
+已发布至 https://music.kwill.cc.cd 。刷新后从当前浏览器恢复歌单、当前歌曲及播放进度，点击播放即可继续；不保存临时播放链接或授权凭据。当前歌曲播放到50%时，按播放模式预加载下一首并在切歌时复用音频元素；随机模式预选结果与实际下一首一致。更换队列或模式时取消旧预加载，失败时在实际播放阶段重新请求。实际缓冲量由浏览器和网络条件决定。
+
+发布前类型检查、构建和79项测试通过，覆盖应用重新挂载后恢复原歌曲47.5秒的位置、50%触发、缓冲复用、随机顺序及预加载失败/取消。线上使用 `aws/verify-release.mjs` 分别验证自定义域名与 CloudFront 入口：首页及 JS/CSS 均200、入口哈希与本地构建一致、最新歌单恢复代码存在、未登录接口401、访问码登录及音乐/语音/模型配置接口200、退出后会话401。本次未扫码或播放真实 QQ 歌曲。
+
+仅更新前端：先复制资源，再原子替换入口，后端进程 PID 保持35151，服务和 Nginx 均 active。完整发布包为 `releases/playback-resume-prefetch-20261104.tar.gz`，已同步 `releases/current.tar.gz`；旧 current 另存 `releases/before-resume-prefetch-current-20261104.tar.gz`。前端回滚包位于 `/var/backups/soundisle/before-resume-prefetch-20261104.tar.gz`；未改动 `.data` 或密钥配置。

@@ -40,7 +40,7 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     if (path === '/api/music/login/channels') return Response.json({ data: { channels: ['qq','wechat'] } });
     return Response.json({ data: {}, summary: '未设置城市，天气未知' });
   };
-  const root = createRoot(document.getElementById('root')!);
+  let root = createRoot(document.getElementById('root')!);
   try {
     await act(async () => root.render(<App/>));
     const play=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='播放')!;
@@ -91,9 +91,17 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     const speakReply=()=>[...document.querySelectorAll('button[aria-label="语音朗读陪伴"]')].at(-1)!;
     const firstMusic = audios.find(a=>!a.src.startsWith('blob:'));
     assert.equal(firstMusic.volume, 0.85 * 0.3);
+    await act(async () => { firstMusic.currentTime = 89; firstMusic.ontimeupdate(); });
+    assert(!steps.includes('music:request:song456'));
+    await act(async () => { firstMusic.currentTime = 90; firstMusic.ontimeupdate(); });
+    assert.equal(steps.filter(step => step === 'music:request:song456').length, 1);
+    const bufferedMusic = audios.filter(a=>!a.src.startsWith('blob:')).at(-1);
+    assert.equal(bufferedMusic.preload, 'auto');
     // A playlist continues automatically, even while the companion is speaking.
     await act(async()=>firstMusic.onended());
     const secondMusic = audios.filter(a=>!a.src.startsWith('blob:')).at(-1);
+    assert.equal(secondMusic, bufferedMusic);
+    assert.equal(steps.filter(step => step === 'music:request:song456').length, 1);
     assert(steps.includes('music:request:song456')); assert.equal(secondMusic.volume, 0.85 * 0.3);
     await act(async()=>audios.find(a=>a.src.startsWith('blob:')).onended());
     assert.equal(secondMusic.volume, 0.85);
@@ -122,18 +130,33 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     assert.equal(latestMusic().src,secondMusic.src);
     await act(async()=>modeButton().dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     assert.match(modeButton().getAttribute('aria-label')!,/^播放模式：顺序播放/);
-    await act(async()=>settings.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    // Reload retains the original playlist, selected second song and exact seek position, without autoplay.
+    await act(async () => { latestMusic().currentTime = 47.5; latestMusic().ontimeupdate(); });
+    const playCount = steps.filter(step => step === 'music:play').length;
+    await act(async () => root.unmount());
+    root = createRoot(document.getElementById('root')!);
+    await act(async () => root.render(<App/>));
+    assert.equal(steps.filter(step => step === 'music:play').length, playCount);
+    assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'), '播放 下一首歌 · 歌手');
+    assert(document.body.textContent?.includes('此刻慢下来'));
+    assert.equal(JSON.parse(localStorage.getItem('soundisle:playback-session')!).position, 47.5);
+    await act(async () => document.querySelector('button[aria-label="播放"]')!.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true })));
+    assert.equal(latestMusic().currentTime, 47.5);
+    const refreshedSettings = [...document.querySelectorAll('button')].find(b => b.textContent === '设置')!;
+    await act(async()=>refreshedSettings.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    await act(async()=>[...document.querySelectorAll('[role="tab"]')].find(b => b.textContent === 'Agent 设置')!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     const reset=[...document.querySelectorAll('button')].find(b=>b.textContent==='恢复默认提示词')!;
     await act(async()=>reset.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     expectedPrompt=DEFAULT_AGENT_PROMPT;assert.equal(JSON.parse(localStorage.getItem('soundisle:agent-prompt')!),DEFAULT_AGENT_PROMPT);
     await act(async()=>document.querySelector('button[aria-label="关闭设置"]')!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     // A single-song recommendation also starts without another play click.
-    await act(async()=>recommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    const refreshedRecommend = [...document.querySelectorAll('button')].find(b => b.textContent === '让阿屿为此刻编排')!;
+    await act(async()=>refreshedRecommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     await act(async()=>finishModel(Response.json({reply:'听听这首。',recommendedSceneId:'rest',mode:'model',playlist:{title:'送你一首歌',songs:[{mid:'single',title:'一首歌',artist:'歌手',duration:180,album:'',coverUrl:''}]}})));
     assert(steps.includes('music:request:single'));
     assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'),'播放 一首歌 · 歌手');
     const synthesisCount=steps.filter(s=>s==='speech:start').length;
-    await act(async()=>recommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    await act(async()=>refreshedRecommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     await act(async()=>finishModel(Response.json({reply:'假装编好了',mode:'model'})));
     assert(document.body.textContent?.includes('这次没有找到合适的歌曲'));
     assert.equal(steps.filter(s=>s==='speech:start').length,synthesisCount+1);

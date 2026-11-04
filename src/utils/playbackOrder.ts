@@ -18,8 +18,31 @@ export class PlaybackOrder {
   private history: string[] = [];
   private position = 0;
   private roundStarted = false;
+  private preview?: { key: string; index: number; order: PlaybackOrder };
   constructor(private random: () => number = Math.random) {}
   public select(ids: string[], currentIndex: number, mode: PlaybackMode, action: 'next' | 'previous' | 'ended'): number {
+    const preview = this.preview;
+    this.preview = undefined;
+    if (preview?.key === JSON.stringify([ids, currentIndex, mode, action === 'next' && mode !== 'repeat-one' ? 'ended' : action])) {
+      const order = preview.order;
+      this.signature = order.signature; this.remaining = order.remaining; this.history = order.history;
+      this.position = order.position; this.roundStarted = order.roundStarted;
+      return preview.index;
+    }
+    return this.advance(ids, currentIndex, mode, action);
+  }
+  // Reserve the automatic successor without moving the listening history.
+  public peek(ids: string[], currentIndex: number, mode: PlaybackMode): number {
+    const key = JSON.stringify([ids, currentIndex, mode, 'ended']);
+    if (this.preview?.key === key) return this.preview.index;
+    const order = new PlaybackOrder(this.random);
+    order.signature = this.signature; order.remaining = [...this.remaining]; order.history = [...this.history];
+    order.position = this.position; order.roundStarted = this.roundStarted;
+    const index = order.advance(ids, currentIndex, mode, 'ended');
+    this.preview = { key, index, order };
+    return index;
+  }
+  private advance(ids: string[], currentIndex: number, mode: PlaybackMode, action: 'next' | 'previous' | 'ended'): number {
     if (!ids.length) return 0;
     const current = Math.max(0, Math.min(ids.length - 1, currentIndex));
     const signature = JSON.stringify([ids, mode]);
