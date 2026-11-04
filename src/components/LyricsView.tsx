@@ -24,9 +24,19 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const activeLineRef = useRef<HTMLButtonElement | null>(null);
 
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [previewLines, setPreviewLines] = useState(4);
+  useEffect(() => {
+    if (immersive || !sectionRef.current || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      setPreviewLines(Math.max(4, Math.min(8, Math.floor((entry.contentRect.height - 48) / 40))));
+    });
+    observer.observe(sectionRef.current);
+    return () => observer.disconnect();
+  }, [immersive]);
   const activeIndex = findActiveLyricIndex(lyrics, currentTime);
-  const start = immersive ? 0 : Math.max(0, Math.min(activeIndex - 1, lyrics.length - 4));
-  const visibleLyrics = immersive ? lyrics : lyrics.slice(start, start + 4);
+  const start = immersive ? 0 : Math.max(0, Math.min(activeIndex - 1, lyrics.length - previewLines));
+  const visibleLyrics = immersive ? lyrics : lyrics.slice(start, start + previewLines);
 
   // Auto-scroll to active lyric line smoothly
   useEffect(() => {
@@ -38,7 +48,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
   }, [activeIndex, immersive, lyrics]);
 
   return (
-    <section aria-label={immersive?'完整歌词':'歌词预览'} className={`relative w-full rounded-2xl border border-stone-800/80 bg-stone-900/60 backdrop-blur-md flex flex-col ${immersive ? 'p-4 h-[65dvh] min-h-64' : 'p-3'}`}>
+    <section ref={sectionRef} aria-label={immersive?'完整歌词':'歌词预览'} className={`relative w-full rounded-2xl border border-stone-800/80 bg-stone-900/60 backdrop-blur-md flex flex-col ${immersive ? 'p-4 h-[65dvh] min-h-64' : 'p-4 min-h-44 md:flex-1 md:min-h-0'}`}>
       {/* Header with translation toggle & status */}
       <div className={`flex items-center justify-between border-b border-stone-800/60 text-xs text-stone-400 ${immersive?'pb-3 mb-2':'pb-2 mb-1'}`}>
         <div className="flex items-center gap-2">
@@ -60,9 +70,9 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
       {/* Scrolling Lyrics List */}
       <div
         ref={containerRef}
-        className={immersive?'min-h-0 flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-stone-800 select-none py-3':'space-y-1 select-none'}
+        className={immersive?'min-h-0 flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-stone-800 select-none py-3':'min-h-0 flex-1 overflow-y-auto space-y-2 select-none py-2'}
       >
-        {!lyrics.length && <p className="text-sm text-stone-500 p-3">这首歌暂无可用歌词，安心听音乐就好。</p>}
+        {!lyrics.length && <p className="text-sm text-stone-500 p-3 h-full flex items-center justify-center text-center">这首歌暂无可用歌词，安心听音乐就好。</p>}
         {visibleLyrics.map((line, offset) => {
           const idx = start + offset;
           const isActive = idx === activeIndex;
@@ -73,7 +83,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
               key={idx}
               ref={isActive ? activeLineRef : null}
               onClick={() => onSeek(line.timeSec)}
-              className={`w-full text-left cursor-pointer rounded-xl ${immersive?'p-3':'px-3 py-1'} transition-all duration-300 group ${
+              className={`w-full text-left cursor-pointer rounded-xl ${immersive?'p-3':'px-3 py-2'} transition-all duration-300 group ${
                 isActive
                   ? 'bg-stone-800/70 border border-stone-700/60 shadow-lg scale-[1.01]'
                   : isPassed
@@ -84,7 +94,7 @@ export const LyricsView: React.FC<LyricsViewProps> = ({
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1 flex-1 min-w-0">
                   <p
-                    className={`text-sm ${immersive?'sm:text-base leading-relaxed':'truncate leading-5'} font-medium transition-colors ${
+                    className={`text-sm ${immersive?'sm:text-base leading-relaxed':'truncate leading-6 sm:text-base'} font-medium transition-colors ${
                       isActive ? 'text-amber-200' : 'text-stone-300'
                     }`}
                     style={isActive ? { color: accentColor } : {}}

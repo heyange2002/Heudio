@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isMediaRequest } from './cloudflare/playback.mjs';
+import { musicIdentityCookie } from './shared/music-identity.mjs';
 import { isAccessCode } from './shared/access-code.mjs';
 
 // Authentication secrets never enter the frontend bundle. TLS handles encryption.
@@ -26,7 +27,10 @@ export function createSecurity({ key, production = false, ttl = 3600000, now = D
     const origin = req.headers.origin;
     if (origin && origin !== `${req.protocol}://${req.get('host')}`) return deny(res, 403, '请求来源无效');
     const id = tokenOf(req), authenticated = id && sessions.has(id);
-    if (req.path === '/auth/session' && req.method === 'GET') return res.json({ authenticated: !!authenticated });
+    if (req.path === '/auth/session' && req.method === 'GET') {
+      if (authenticated) res.setHeader('Set-Cookie', musicIdentityCookie(req.headers.cookie, req.secure));
+      return res.json({ authenticated: !!authenticated });
+    }
     if (req.path === '/auth/session' && req.method === 'POST') {
       const ip = req.ip || req.socket.remoteAddress;
       let a = attempts.get(ip);
@@ -37,7 +41,7 @@ export function createSecurity({ key, production = false, ttl = 3600000, now = D
       if (sessions.size >= 1000) return deny(res, 503, '服务繁忙');
       if (id) sessions.delete(id);
       const fresh = randomBytes(32).toString('hex'); sessions.set(fresh, now() + ttl);
-      res.setHeader('Set-Cookie', `${cookie}=${fresh}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${Math.floor(ttl / 1000)}${req.secure ? '; Secure' : ''}`);
+      res.setHeader('Set-Cookie', [`${cookie}=${fresh}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${Math.floor(ttl / 1000)}${req.secure ? '; Secure' : ''}`, musicIdentityCookie(req.headers.cookie, req.secure)]);
       return res.json({ authenticated: true });
     }
     if (!authenticated) return deny(res, 401, '请先输入4位数字访问码');

@@ -3,7 +3,6 @@ import { MusicSidebar } from './components/MusicSidebar';
 import { LyricsModal } from './components/LyricsModal';
 import { DEFAULT_AGENT_PROMPT, normalizeAgentPrompt, musicIntentHint } from '../shared/agent-policy.mjs';
 import { qqTrack, parseLyrics, readLocal, saveLocal, type QQSong, type CompanionProfile as Profile } from './utils/music';
-import { workspaceView, type AppSection } from './utils/navigation';
 import { apiFetch } from './api';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { DEFAULT_SPEECH } from '../shared/speech.mjs';
@@ -11,45 +10,31 @@ import { SpeechPlayer, type SpeechState } from './utils/speechPlayer';
 import {
   MusicTrack,
   SceneMode,
-  AmbientMix,
   AgentMessage,
   ServiceSettings,
 } from './types/music';
-import { INITIAL_TRACKS, SCENE_CONFIGS } from './data/mockTracks';
+import { EMPTY_TRACK } from './data/sceneThemes';
+import { DEFAULT_EQ, normalizeEqualizer, type EqualizerSettings } from './utils/equalizer';
 import { audioEngine } from './utils/audioEngine';
-import { calculateNextTrackIndex } from './utils/sceneAnalyzer';
+import { PlaybackOrder, normalizePlaybackMode, nextPlaybackMode } from './utils/playbackOrder';
 import { TopBar } from './components/TopBar';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { LyricsView } from './components/LyricsView';
 import { AgentCompanion } from './components/AgentCompanion';
 import { PlayerControls } from './components/PlayerControls';
-import { AmbientMixerDrawer } from './components/AmbientMixerDrawer';
+import { EqualizerDrawer } from './components/EqualizerDrawer';
 import { ProviderSettingsModal } from './components/ProviderSettingsModal';
-import {
-  Brain,
-  Headphones,
-  Sparkles,
-  Layers,
-  ArrowRight,
-  Flame,
-  CloudRain,
-  Waves,
-  Wind,
-  Coffee,
-  CheckCircle2,
-} from 'lucide-react';
-
 export default function App() {
-  const [tracks, setTracks] = useState<MusicTrack[]>(INITIAL_TRACKS);
+  const [tracks, setTracks] = useState<MusicTrack[]>([EMPTY_TRACK]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [currentScene, setCurrentScene] = useState<SceneMode>('focus');
-  const [activeSection, setActiveSection] = useState<AppSection>('home');
   const [volume, setVolume] = useState(0.85);
 
-  const [ambientMix, setAmbientMix] = useState<AmbientMix>(SCENE_CONFIGS.focus.ambientDefaults);
-  const [isMixerOpen, setIsMixerOpen] = useState(false);
+  const [equalizer, setEqualizer] = useState<EqualizerSettings>(() => normalizeEqualizer(readLocal('soundisle:eq', DEFAULT_EQ)));
+  const [isEqualizerOpen, setIsEqualizerOpen] = useState(false);
+  useEffect(() => { saveLocal('soundisle:eq', equalizer); audioEngine.setEqualizer(equalizer); }, [equalizer]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMusicOpen, setIsMusicOpen] = useState(false);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
@@ -65,11 +50,14 @@ export default function App() {
     voiceId: DEFAULT_SPEECH.voiceId,
     voiceSpeed: DEFAULT_SPEECH.speed,
     voiceAutoPlay: true,
-    autoAdvance: true,
+    playbackMode: normalizePlaybackMode(readLocal('soundisle:playback-mode', 'sequential')),
     motionEnabled: true,
     pureMusicMode: false,
     sleepTimerMinutes: null,
   });
+
+  const playbackOrder = useRef(new PlaybackOrder());
+  useEffect(() => { saveLocal('soundisle:playback-mode', settings.playbackMode); }, [settings.playbackMode]);
 
   const [speechState, setSpeechState] = useState<SpeechState>({ status: 'idle', text: '' });
   const speechPlayer = useMemo(() => new SpeechPlayer(setSpeechState), []);
@@ -130,20 +118,8 @@ export default function App() {
     return () => { chatController.current?.abort(); audioEngine.pause(); audioEngine.onError(() => {}); audioEngine.onStarted(() => {}); };
   }, []);
   useEffect(() => { audioEngine.setSpeechDucking(speechState.status === 'playing'); return () => audioEngine.setSpeechDucking(false); }, [speechState.status]);
-  useEffect(() => {
-    if (settings.musicSource === 'soundisle-builtin') { audioEngine.pause(); setIsPlaying(false); setTracks(INITIAL_TRACKS); setCurrentTrackIndex(0); setCurrentTime(0); }
-  }, [settings.musicSource]);
-
-  const currentTrack = tracks[currentTrackIndex] || tracks[0];
-
-  const workspaceRef = useRef<HTMLDivElement>(null);
-  const view = workspaceView(activeSection, settings.pureMusicMode);
-  useEffect(() => {
-    if (activeSection === 'home') { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-    const target = workspaceRef.current;
-    target?.focus({ preventScroll: true });
-    target?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
-  }, [activeSection]);
+  const currentTrack = tracks[currentTrackIndex] || EMPTY_TRACK;
+  const view = settings.pureMusicMode ? 'music' : 'companion';
 
   // Sync audio engine callbacks
   useEffect(() => {
@@ -154,7 +130,7 @@ export default function App() {
     audioEngine.onTrackEnded(() => {
       handleNext(true);
     });
-  }, [currentTrackIndex, settings.autoAdvance, tracks]);
+  }, [currentTrackIndex, settings.playbackMode, tracks, isPlaying]);
 
   // Handle sleep timer countdown
   const timerIntervalRef = useRef<number | null>(null);
@@ -200,12 +176,7 @@ export default function App() {
   };
 
   const handleNext = (fromAuto: boolean = false) => {
-    const nextIdx = calculateNextTrackIndex(
-      currentTrackIndex,
-      tracks.length,
-      fromAuto ? settings.autoAdvance : true,
-      'advance'
-    );
+    const nextIdx = playbackOrder.current.select(tracks.map(track => track.id), currentTrackIndex, settings.playbackMode, fromAuto ? 'ended' : 'next');
     setCurrentTrackIndex(nextIdx);
     setCurrentTime(0);
     if (isPlaying) {
@@ -214,7 +185,7 @@ export default function App() {
   };
 
   const handlePrev = () => {
-    const prevIdx = calculateNextTrackIndex(currentTrackIndex, tracks.length, true, 'previous');
+    const prevIdx = playbackOrder.current.select(tracks.map(track => track.id), currentTrackIndex, settings.playbackMode, 'previous');
     setCurrentTrackIndex(prevIdx);
     setCurrentTime(0);
     if (isPlaying) {
@@ -232,49 +203,7 @@ export default function App() {
     audioEngine.setMasterVolume(vol);
   };
 
-  const handleAmbientMixChange = (partialMix: Partial<AmbientMix>) => {
-    const newMix = { ...ambientMix, ...partialMix };
-    setAmbientMix(newMix);
-    audioEngine.setAmbientMix(newMix);
-  };
-
-  const handleResetSceneAmbient = () => {
-    const sceneConfig = SCENE_CONFIGS[currentScene];
-    if (sceneConfig) {
-      setAmbientMix(sceneConfig.ambientDefaults);
-      audioEngine.setAmbientMix(sceneConfig.ambientDefaults);
-    }
-  };
-
-  // Switch scene mode
-  const handleSelectScene = (sceneId: SceneMode) => {
-    setCurrentScene(sceneId);
-    const sceneConfig = SCENE_CONFIGS[sceneId];
-    if (sceneConfig) {
-      // Find matching track
-      const matchingTrackIndex = tracks.findIndex((t) => t.scene === sceneId);
-      if (matchingTrackIndex !== -1) {
-        setCurrentTrackIndex(matchingTrackIndex);
-        setCurrentTime(0);
-        if (isPlaying) {
-          audioEngine.playTrack(tracks[matchingTrackIndex], 0);
-        }
-      }
-      setAmbientMix(sceneConfig.ambientDefaults);
-      audioEngine.setAmbientMix(sceneConfig.ambientDefaults);
-
-      // Add gentle system acknowledgement
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now()),
-          role: 'system',
-          content: `已为你切换至「${sceneConfig.name}」场景，声景与律动已自然平移。`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-    }
-  };
+  const handleSelectScene = (scene: SceneMode) => setCurrentScene(scene);
 
   const playQQSong = (song: QQSong) => {
     const next = qqTrack(song, currentScene);
@@ -339,7 +268,8 @@ export default function App() {
           timeOfDay: timeContextText,
           userPreferences: {
             motionEnabled: settings.motionEnabled,
-            autoAdvance: settings.autoAdvance,
+            autoAdvance: settings.playbackMode !== 'repeat-one',
+            playbackMode: settings.playbackMode,
           },
         }),
       });
@@ -368,11 +298,6 @@ export default function App() {
       // Apply recommended scene and track if changed
       if (resultData.recommendedSceneId && resultData.recommendedSceneId !== currentScene) {
         setCurrentScene(resultData.recommendedSceneId as SceneMode);
-      }
-
-      // Apply ambient adjustments
-      if (resultData.ambientAdjustments) {
-        handleAmbientMixChange(resultData.ambientAdjustments);
       }
 
       autoSpeak(resultData.reply);
@@ -405,92 +330,24 @@ export default function App() {
       }}
     >
       {/* Top Bar Navigation */}
-      <TopBar
-        activeSection={activeSection}
-        onSelectSection={(sec) => {
-          if (sec === 'lyrics') { setIsLyricsOpen(true); return; }
-          if (!['home', 'companion', 'visualizer', 'lyrics'].includes(sec)) return;
-          setActiveSection(sec as AppSection);
-          setSettings(prev => ({ ...prev, pureMusicMode: false }));
-        }}
+      <TopBar onHome={() => setSettings(prev => ({ ...prev, pureMusicMode: false }))}
         pureMusicMode={settings.pureMusicMode}
-        onTogglePureMusic={() =>
-          setSettings((prev) => ({ ...prev, pureMusicMode: !prev.pureMusicMode }))
-        }
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenMixer={() => setIsMixerOpen(true)}
-        currentSceneName={SCENE_CONFIGS[currentScene].name}
-      />
+        onTogglePureMusic={() => setSettings(prev => ({ ...prev, pureMusicMode: !prev.pureMusicMode }))}
+        onOpenSettings={() => setIsSettingsOpen(true)} />
 
       {/* Main Container */}
       <MusicSidebar isOpen={isMusicOpen} onToggle={()=>setIsMusicOpen(prev=>!prev)} onClose={()=>setIsMusicOpen(false)} count={qqQueue.length}>
         <QQMusicPanel
           onPlay={playQQSong} onQueue={installQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
-          onRecommend={() => { setIsMusicOpen(false); setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); setActiveSection('companion'); void handleSendMessage('结合我的音乐偏好、当前时间、天气和工作状态，为我编排一张适合现在听的 QQ 音乐歌单。', 'qq-music', 'playlist'); }}/>
+          onRecommend={() => { setIsMusicOpen(false); setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); void handleSendMessage('结合我的音乐偏好、当前时间、天气和工作状态，为我编排一张适合现在听的 QQ 音乐歌单。', 'qq-music', 'playlist'); }}/>
         {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="px-2 text-xs leading-relaxed text-stone-500">还未选择歌曲。搜索歌曲或让阿屿选歌后，即可播放 QQ 音乐。</p>}
       </MusicSidebar>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto pl-16 pr-4 sm:pr-6 2xl:pl-6 py-6 pb-36 space-y-6">
-        {/* 1. Context Scene Selector Bar (4 Core Transition Modes) */}
-        {!settings.pureMusicMode && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-stone-400">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-stone-200">当前日常心境流转</span>
-                <span aria-hidden="true">·</span>
-                <span>在专注、休息、运动与睡眠之间自然过渡</span>
-              </div>
-              <div className="hidden sm:flex items-center gap-2 font-mono text-[11px] text-stone-500">
-                <span>{SCENE_CONFIGS[currentScene].targetBpm}</span>
-              </div>
-            </div>
-
-            {/* Segmented Scene Buttons */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-1 bg-stone-900/70 border border-stone-800/80 rounded-2xl">
-              {(['focus', 'rest', 'workout', 'sleep'] as SceneMode[]).map((mode) => {
-                const config = SCENE_CONFIGS[mode];
-                const isActive = currentScene === mode;
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => handleSelectScene(mode)}
-                    className={`py-3 px-4 rounded-xl text-left transition-all relative ${
-                      isActive
-                        ? 'bg-stone-800/95 text-stone-100 shadow-md border border-stone-700/80'
-                        : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-semibold">{config.name}</span>
-                      {isActive && (
-                        <span
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: config.themeColor }}
-                        />
-                      )}
-                    </div>
-                    <p className="text-[11px] text-stone-400 truncate">{config.tagline}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
+      <main className={`flex-1 max-w-7xl w-full mx-auto pl-16 pr-4 sm:pr-6 2xl:pl-6 py-6 pb-36 space-y-6 ${settings.pureMusicMode ? '' : 'md:h-[calc(100dvh-4rem)] md:min-h-[640px] md:flex md:flex-col md:flex-none md:pb-32'}`}>
         {musicError && <p role="alert" className="text-sm text-rose-300">{musicError}</p>}
         {/* 2. Core Workspace Layout */}
-        <div ref={workspaceRef} id="music-workspace" tabIndex={-1} className="scroll-mt-32 lg:scroll-mt-24 outline-none" data-view={view}>
-        {view === 'visualizer' ? (
-          <section aria-label="声音律动" className="max-w-4xl mx-auto">
-            <AudioVisualizer currentTrack={currentTrack} isPlaying={isPlaying} motionEnabled={settings.motionEnabled}
-              onToggleMotion={() => setSettings(prev => ({ ...prev, motionEnabled: !prev.motionEnabled }))} pureMusicMode={true} />
-          </section>
-        ) : view === 'lyrics' ? (
-          <section aria-label="沉浸歌词" className="max-w-4xl mx-auto">
-            <h2 className="text-xl font-semibold mb-4">{currentTrack.title} · 沉浸歌词</h2>
-            <LyricsView lyrics={currentTrack.lyrics} currentTime={currentTime} onSeek={handleSeek} accentColor={currentTrack.themeColors.accent} immersive />
-          </section>
-        ) : view === 'music' ? (
+        <div id="music-workspace" tabIndex={-1} className={`scroll-mt-32 lg:scroll-mt-24 outline-none ${settings.pureMusicMode ? '' : 'md:flex-1 md:min-h-0'}`} data-view={view}>
+        {view === 'music' ? (
           /* Pure Music / Zen Mode (Expanded Visualizer + Lyrics Center Stage) */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
             <div className="lg:col-span-7">
@@ -516,9 +373,9 @@ export default function App() {
           </div>
         ) : (
           /* Companion Mode (Split: Left Agent Dialogue, Right Visualizer & Synced Lyrics) */
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start md:items-stretch md:h-full md:min-h-0">
             {/* Left Column: Agent Companion & Measured Dialogue */}
-            <div className="md:col-span-6 xl:col-span-5 space-y-4">
+            <div className="md:col-span-6 xl:col-span-5 space-y-4 md:flex md:flex-col md:min-h-0">
               {agentStatus && <p role="status" className="text-xs text-stone-400">{agentStatus}</p>}
               <AgentCompanion
                 messages={messages}
@@ -534,32 +391,10 @@ export default function App() {
                 onListeningChange={active => audioEngine.setInputMuted(active)}
               />
 
-              {/* Natural sound ambient indicator banner */}
-              <div className="rounded-2xl border border-stone-800/80 bg-stone-900/50 p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-amber-400/10 text-amber-400">
-                    <Waves className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-semibold text-stone-200">
-                      自然声景层 · 已同步当前场景
-                    </h5>
-                    <p className="text-[11px] text-stone-400">
-                      雨声 {Math.round(ambientMix.rain * 100)}% · 潮涌 {Math.round(ambientMix.waves * 100)}% · 风声 {Math.round(ambientMix.wind * 100)}%
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsMixerOpen(true)}
-                  className="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium transition-colors"
-                >
-                  调整混音
-                </button>
-              </div>
             </div>
 
             {/* Right Column: Visualizer & Synced Lyrics */}
-            <div className="md:col-span-6 xl:col-span-7 space-y-4">
+            <div className="md:col-span-6 xl:col-span-7 space-y-4 md:flex md:flex-col md:min-h-0">
               <AudioVisualizer
                 currentTrack={currentTrack}
                 isPlaying={isPlaying}
@@ -600,33 +435,16 @@ export default function App() {
         onSeek={handleSeek}
         volume={volume}
         onChangeVolume={handleVolumeChange}
-        autoAdvance={settings.autoAdvance}
-        onToggleAutoAdvance={() =>
-          setSettings((prev) => ({ ...prev, autoAdvance: !prev.autoAdvance }))
-        }
-        motionEnabled={settings.motionEnabled}
-        onToggleMotion={() =>
-          setSettings((prev) => ({ ...prev, motionEnabled: !prev.motionEnabled }))
-        }
-        pureMusicMode={settings.pureMusicMode}
-        onTogglePureMusic={() =>
-          setSettings((prev) => ({ ...prev, pureMusicMode: !prev.pureMusicMode }))
-        }
-        onOpenMixer={() => setIsMixerOpen(true)}
+        playbackMode={settings.playbackMode}
+        onCyclePlaybackMode={() => setSettings(prev => ({ ...prev, playbackMode: nextPlaybackMode(prev.playbackMode) }))}
+        onOpenEqualizer={() => setIsEqualizerOpen(true)}
         sleepTimerMinutes={settings.sleepTimerMinutes}
         onSetSleepTimer={(mins) =>
           setSettings((prev) => ({ ...prev, sleepTimerMinutes: mins }))
         }
       />
 
-      {/* Ambient Sound Mixer Drawer */}
-      <AmbientMixerDrawer
-        isOpen={isMixerOpen}
-        onClose={() => setIsMixerOpen(false)}
-        mix={ambientMix}
-        onChangeMix={handleAmbientMixChange}
-        onResetToSceneDefaults={handleResetSceneAmbient}
-      />
+      <EqualizerDrawer isOpen={isEqualizerOpen} onClose={() => setIsEqualizerOpen(false)} settings={equalizer} onChange={setEqualizer} />
 
       {/* Provider & Service Settings Modal */}
       <ProviderSettingsModal

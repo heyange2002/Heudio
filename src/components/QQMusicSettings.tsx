@@ -60,7 +60,7 @@ export function QQMusicSettings() {
       <div className="flex flex-wrap gap-2"><select aria-label="QQ 音乐连接方式" className={input} value={config.mode} onChange={e => setConfig({ ...config, mode: e.target.value })}><option value="embedded">内置 QQ 音乐服务</option><option value="gateway">自建 QQ 音乐服务</option></select>
         {config.mode === 'gateway' && <input aria-label="QQ 音乐服务地址" placeholder="https://你的音乐服务地址" className={input + ' flex-1 min-w-48'} value={config.url} onChange={e => setConfig({ ...config, url: e.target.value })}/>}
         <button disabled={busy} className="text-xs text-amber-300" onClick={() => run(async () => { setQrKey(''); setQrImage(''); await call('/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) }); await refresh(); window.dispatchEvent(new window.Event('soundisle:music-auth-changed')); })}>保存并检查连接</button></div>
-      <p className="text-xs text-stone-500">使用 yakult-green-tea/qq-music-api。自建服务可提供更多扫码通道；更换连接方式后需重新授权。</p>
+      <p className="text-xs text-stone-500">使用 yakult-green-tea/qq-music-api。自建服务可提供更多扫码通道；授权会在此浏览器长期保存并自动续期；更换连接方式或 QQ 要求重新验证时需再次扫码。</p>
       <div className="flex flex-wrap items-center gap-3"><select aria-label="扫码通道" className={input} value={channel} onChange={e => { setChannel(e.target.value); setQrKey(''); setQrImage(''); }}>{channels.map(c => <option key={c} value={c}>{c === 'qq' ? '手机 QQ 扫码' : c === 'wechat' ? '微信扫码' : 'QQ 音乐 App 扫码'}</option>)}</select>
         <button disabled={busy || !channel} className="text-xs text-amber-300" onClick={() => run(async () => {
           setQrKey(''); setQrImage(''); setQrBusy(true); setStatus('正在向 QQ 获取授权二维码…');

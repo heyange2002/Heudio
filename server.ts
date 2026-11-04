@@ -1,4 +1,4 @@
-import { musicRoute, createMusicClient } from './cloudflare/music.mjs';
+import { musicRoute, createMusicClient, refreshSavedMusicSessions } from './cloudflare/music.mjs';
 import { getWeather } from './cloudflare/context.mjs';
 import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -44,7 +44,17 @@ let musicState = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile
 const persistMusic = () => { fs.writeFileSync(stateFile + '.tmp', JSON.stringify(musicState), { mode: 0o600 }); fs.renameSync(stateFile + '.tmp', stateFile); };
 if (!musicState['qq:secret']) { musicState['qq:secret'] = randomBytes(32).toString('hex'); persistMusic(); }
 const musicEnv = { ...process.env, QQ_SESSION_SECRET: process.env.QQ_SESSION_SECRET || musicState['qq:secret'] };
-const musicStore = { get: async (key: string) => musicState[key], put: async (key: string, value: unknown) => { musicState[key] = value; persistMusic(); }, delete: async (key: string) => { delete musicState[key]; persistMusic(); } };
+const musicStore = { keys: async (prefix: string) => Object.keys(musicState).filter(key => key.startsWith(prefix)), get: async (key: string) => musicState[key], put: async (key: string, value: unknown) => { musicState[key] = value; persistMusic(); }, delete: async (key: string) => { delete musicState[key]; persistMusic(); } };
+let musicRefreshRunning = false;
+const renewMusic = async () => {
+  if (musicRefreshRunning) return;
+  musicRefreshRunning = true;
+  try { await refreshSavedMusicSessions(musicEnv, musicStore); }
+  catch { console.warn('QQ session renewal deferred'); }
+  finally { musicRefreshRunning = false; }
+};
+setInterval(renewMusic, 5 * 60000).unref();
+void renewMusic();
 const webRequest = (req: express.Request, signal?: AbortSignal) => new Request(`${req.protocol}://${req.get('host')}${req.originalUrl}`, { method: req.method, signal, headers: { Cookie: req.headers.cookie || '', 'Content-Type': 'application/json', ...(req.headers.range ? { Range: req.headers.range } : {}) }, ...(['POST','PUT'].includes(req.method) ? { body: JSON.stringify(req.body) } : {}) });
 app.use('/api/music', async (req, res) => {
   const controller = new AbortController(); const cancel = () => controller.abort(); res.on('close', cancel);

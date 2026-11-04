@@ -1,3 +1,4 @@
+import { Play } from 'lucide-react';
 import { MusicQueue } from './MusicQueue';
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api';
@@ -59,7 +60,7 @@ export function QQMusicPanel({ onPlay, onQueue, queue, queueTitle, onRecommend, 
       const { normalizeSongs } = await import('../../shared/music-normalize.mjs'); setSongs(normalizeSongs(data));
     })}>{p.title || p.dissname || '未命名歌单'}</button>)}</div>}
     {!!songs.length && <div><div className="flex justify-between mb-2"><h3 className="text-xs text-stone-400">查询结果</h3><button className="text-xs text-amber-300" onClick={() => onQueue(songs, keyword || 'QQ 音乐选集')}>用这些歌组成队列</button></div>
-      <div className="max-h-64 overflow-y-auto grid sm:grid-cols-2 gap-2">{songs.map(song => <button key={song.mid} className="flex gap-3 items-center text-left p-2 rounded-xl hover:bg-stone-800" onClick={() => onPlay(song)}><TrackCover trackId={'qq:'+song.mid} src={song.coverUrl} alt={song.title} className="w-10 h-10 rounded-lg"/><span className="min-w-0"><span className="block text-sm truncate">{song.title}</span><span className="block text-xs text-stone-400 truncate">{song.artist}</span></span><span className="ml-auto text-xs text-amber-300">播放</span></button>)}</div></div>}
+      <div className="max-h-64 overflow-y-auto grid sm:grid-cols-2 gap-2">{songs.map(song => <button key={song.mid} type="button" aria-label={`播放 ${song.title} · ${song.artist}`} className="min-w-0 flex gap-3 items-center text-left p-2 rounded-xl hover:bg-stone-800" onClick={() => onPlay(song)}><TrackCover trackId={'qq:'+song.mid} src={song.coverUrl} alt={song.title} className="w-10 h-10 shrink-0 rounded-lg object-cover"/><span className="min-w-0 flex-1"><span className="block text-sm truncate">{song.title}</span><span className="block text-xs text-stone-400 truncate">{song.artist}</span></span><Play aria-hidden="true" className="ml-auto w-4 h-4 shrink-0 text-amber-300"/></button>)}</div></div>}
     <MusicQueue songs={queue} title={queueTitle} currentMid={currentMid} isPlaying={isPlaying} onPlay={onPlay}/>
   </section>;
 }

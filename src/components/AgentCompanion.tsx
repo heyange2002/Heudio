@@ -68,7 +68,7 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
   };
 
   return (
-    <div className="w-full rounded-2xl border border-stone-800/80 bg-stone-900/60 backdrop-blur-md p-5 flex flex-col h-[min(580px,calc(100dvh-15rem))] min-h-[360px]">
+    <div className="w-full rounded-2xl border border-stone-800/80 bg-stone-900/60 backdrop-blur-md p-5 flex flex-col h-[min(580px,calc(100dvh-15rem))] min-h-[360px] md:h-auto md:min-h-0 md:flex-1">
       {/* Header with context indicators */}
       <div className="flex flex-col gap-2 pb-3 mb-3 border-b border-stone-800/60 text-xs text-stone-400">
         <div className="flex flex-wrap items-center gap-2">

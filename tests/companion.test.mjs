@@ -22,7 +22,7 @@ test('M3 uses server credentials and returns validated scene JSON', async () => 
   });
   assert.equal(result.mode, 'model'); assert.equal(result.model, 'MiniMax-M3');
   assert.equal(result.reply, reply.reply); assert.equal(result.extra, undefined);
-  assert.deepEqual(result.ambientAdjustments, { rain: 0.3 });
+  assert.equal(result.ambientAdjustments, undefined);
   assert.deepEqual(companionConfig(env), { provider: 'minimax', model: 'MiniMax-M3', configured: true });
 });
 

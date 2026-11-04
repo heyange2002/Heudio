@@ -9,7 +9,7 @@ export interface LyricLine {
 export interface MusicTrack {
   id: string;
   qqMid?: string;
-  source?: 'qq-music' | 'builtin';
+  source?: 'qq-music';
   title: string;
   artist: string;
   album: string;
@@ -25,27 +25,7 @@ export interface MusicTrack {
     gradient: string;
   };
   lyrics: LyricLine[];
-  audioPreset: 'lofi-code' | 'ambient-drift' | 'gentle-piano' | 'sunrise-stride' | 'sleep-drift' | 'coastal-rest';
   description: string;
-}
-
-export interface AmbientMix {
-  rain: number;
-  waves: number;
-  fire: number;
-  wind: number;
-  cafe: number;
-}
-
-export interface MusicScene {
-  id: SceneMode;
-  name: string;
-  tagline: string;
-  description: string;
-  targetBpm: string;
-  ambientDefaults: AmbientMix;
-  recommendedTrackIds: string[];
-  themeColor: string;
 }
 
 export interface AgentMessage {
@@ -59,15 +39,17 @@ export interface AgentMessage {
   quickActions?: string[];
 }
 
+export type PlaybackMode = 'sequential' | 'shuffle' | 'repeat-one';
+
 export interface ServiceSettings {
-  musicSource: 'soundisle-builtin' | 'qq-music';
+  musicSource: 'qq-music';
   chatModel: 'MiniMax-M3' | 'local-heuristic';
   voiceTts: 'minimax' | 'silent';
   voiceModel: string;
   voiceId: string;
   voiceSpeed: number;
   voiceAutoPlay: boolean;
-  autoAdvance: boolean; // "限制自动切歌"
+  playbackMode: PlaybackMode;
   motionEnabled: boolean; // "关闭动效"
   pureMusicMode: boolean; // "只听音乐"
   sleepTimerMinutes: number | null; // e.g. 15, 30, 45 or null

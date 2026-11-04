@@ -1,5 +1,5 @@
 import { TrackCover } from './TrackCover';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MusicTrack } from '../types/music';
 import { audioEngine } from '../utils/audioEngine';
 import { Sparkles, EyeOff } from 'lucide-react';
@@ -19,6 +19,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   onToggleMotion,
   pureMusicMode,
 }) => {
+  const [motionStyle, setMotionStyle] = useState(() => { try { return localStorage.getItem('soundisle:motion-style') === 'spectrum' ? 'spectrum' : 'orbit'; } catch { return 'orbit'; } });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
@@ -85,6 +86,16 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       ctx.save();
       ctx.translate(centerX, centerY);
 
+      if (motionStyle === 'spectrum') {
+        ctx.restore();
+        const barWidth = width / barCount;
+        for (let i = 0; i < barCount; i++) {
+          const val = isPlaying ? freqData[i % freqData.length] / 255 : 0.04;
+          ctx.fillStyle = currentTrack.themeColors.accent; ctx.globalAlpha = 0.4 + val * 0.6;
+          ctx.fillRect(i * barWidth + 2, height - 16 - val * 130, barWidth - 4, Math.max(3, val * 130));
+        }
+        animationFrameRef.current = requestAnimationFrame(render); return;
+      }
       // Draw outer audio reactive bars
       for (let i = 0; i < barCount; i++) {
         const angle = i * step + phase;
@@ -139,12 +150,12 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [motionEnabled, isPlaying, currentTrack]);
+  }, [motionEnabled, isPlaying, currentTrack, motionStyle]);
 
   return (
-    <div
+    <section aria-label="专辑动效"
       className={`relative w-full rounded-2xl overflow-hidden border border-stone-800/80 bg-stone-900/60 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-500 ${
-        pureMusicMode ? 'min-h-[500px] lg:min-h-[580px]' : 'h-[clamp(300px,calc(100dvh-27rem),440px)] min-h-[300px]'
+        pureMusicMode ? 'min-h-[500px] lg:min-h-[580px]' : 'h-[clamp(300px,calc(100dvh-27rem),440px)] min-h-[300px] md:shrink-0'
       }`}
     >
       {/* Dynamic ambient color glow backdrop */}
@@ -163,26 +174,14 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           className="absolute inset-0 w-full h-full object-contain pointer-events-none"
         />
       ) : (
-        /* Static serene typography mode when motion is disabled */
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center select-none">
-          <div
-            className="w-48 h-48 rounded-full border border-stone-700/60 flex items-center justify-center mb-6"
-            style={{
-              boxShadow: `0 0 60px ${currentTrack.themeColors.glow}`,
-            }}
-          >
-            <div className="w-40 h-40 rounded-full border border-stone-800 flex items-center justify-center">
-              <span className="text-xs uppercase tracking-widest text-stone-400 font-mono">
-                静止律动 · 留白
-              </span>
-            </div>
-          </div>
-          <p className="text-xs text-stone-500 max-w-xs">
-            动效已关闭。纯净极简展示，降低眼部负荷与系统功耗。
-          </p>
+        <div aria-hidden="true" className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-64 h-64 rounded-full border border-stone-700/30" style={{ boxShadow: `0 0 60px ${currentTrack.themeColors.glow}` }}/>
         </div>
       )}
 
+      <div aria-label="动效样式" className="absolute top-3 right-3 z-20 flex gap-1 p-1 rounded-lg bg-stone-950/60 border border-stone-800">
+        {([['orbit', '环绕'], ['spectrum', '频谱']] as const).map(([value, label]) => <button key={value} aria-pressed={motionStyle === value} onClick={() => { setMotionStyle(value); try { localStorage.setItem('soundisle:motion-style', value); } catch {} }} className={`px-2 py-1 text-[11px] rounded-md ${motionStyle === value ? 'text-amber-300 bg-stone-800' : 'text-stone-500 hover:text-stone-200'}`}>{label}</button>)}
+      </div>
       {/* Center Track Artwork & Title */}
       <div className={`relative z-10 flex flex-col items-center ${pureMusicMode?'p-6':'p-4'} text-center max-w-md`}>
         <div className={`relative group ${pureMusicMode?'mb-5':'mb-3'}`}>
@@ -200,9 +199,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           )}
         </div>
 
-        <span className="text-xs uppercase tracking-widest font-mono text-stone-400 mb-1">
-          {currentTrack.genre} · {currentTrack.bpm} BPM
-        </span>
+        <span className="text-xs uppercase tracking-widest font-mono text-stone-400 mb-1">{currentTrack.genre}</span>
         <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-stone-100 text-balance mb-1.5">
           {currentTrack.title}
         </h2>
@@ -220,6 +217,6 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </section>
   );
 };

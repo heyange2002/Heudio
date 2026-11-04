@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { musicIdentityCookie } from '../shared/music-identity.mjs';
 import { isAccessCode } from '../shared/access-code.mjs';
 const digest = value => createHash('sha256').update(value).digest('hex');
 const response = (body,status=200,headers={}) => Response.json(body,{status,headers:{'Cache-Control':'no-store',...headers}});
@@ -11,7 +12,7 @@ export class AuthStore {
     const store=this.ctx.storage,now=Date.now(),fingerprint=digest(key);
     const token=tokenOf(request),record=token?await store.get('session:'+digest(token)):null;
     const authenticated=!!(record&&record.expires>now&&record.fingerprint===fingerprint);
-    if(request.method==='GET')return response({authenticated});
+    if(request.method==='GET')return response({authenticated},200,authenticated?{'Set-Cookie':musicIdentityCookie(request.headers.get('Cookie'))}:{});
     if(request.method==='DELETE'){
       if(token)await store.delete('session:'+digest(token));
       return response({authenticated:false},200,{'Set-Cookie':'soundisle_session=; HttpOnly; Secure; SameSite=Strict; Path=/api; Max-Age=0'});
@@ -29,7 +30,10 @@ export class AuthStore {
     if(!isAccessCode(body.key)||!timingSafeEqual(Buffer.from(digest(body.key),'hex'),Buffer.from(fingerprint,'hex')))return response({error:'访问码不正确，请输入4位数字'},401);
     if(token)await store.delete('session:'+digest(token));
     const fresh=randomBytes(32).toString('hex');await store.put('session:'+digest(fresh),{expires:now+3600000,fingerprint});
-    return response({authenticated:true},200,{'Set-Cookie':`soundisle_session=${fresh}; HttpOnly; Secure; SameSite=Strict; Path=/api; Max-Age=3600`});
+    const headers=new Headers();
+    headers.append('Set-Cookie',`soundisle_session=${fresh}; HttpOnly; Secure; SameSite=Strict; Path=/api; Max-Age=3600`);
+    headers.append('Set-Cookie',musicIdentityCookie(request.headers.get('Cookie')));
+    const result=response({authenticated:true});for(const value of headers.getSetCookie())result.headers.append('Set-Cookie',value);return result;
   }
   async alarm(){
     const now=Date.now();

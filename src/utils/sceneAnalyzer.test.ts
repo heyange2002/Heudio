@@ -4,7 +4,6 @@ import {
   formatTime,
   findActiveLyricIndex,
   calculateNextTrackIndex,
-  analyzeUserPrompt,
 } from './sceneAnalyzer';
 
 test('formatTime correctly formats seconds to mm:ss', () => {
@@ -39,25 +38,4 @@ test('calculateNextTrackIndex respects autoAdvance restriction', () => {
   assert.equal(calculateNextTrackIndex(1, total, false, 'advance'), 1);
   // Manual previous still works
   assert.equal(calculateNextTrackIndex(1, total, false, 'previous'), 0);
-});
-
-test('analyzeUserPrompt maps sleep and workout intents', () => {
-  const sleepRes = analyzeUserPrompt('最近总是失眠，想早点睡下');
-  assert.equal(sleepRes.sceneId, 'sleep');
-  assert.equal(sleepRes.isCorrection, false);
-  assert.ok(sleepRes.reply.length > 5);
-
-  const workoutRes = analyzeUserPrompt('晨跑5公里，需要有节奏的歌');
-  assert.equal(workoutRes.sceneId, 'workout');
-  assert.equal(workoutRes.recommendedTrackId, 'sunrise-stride');
-});
-
-test('analyzeUserPrompt correctly handles user correction ("纠正推荐")', () => {
-  const pianoRes = analyzeUserPrompt('换成纯钢琴，不要其他乐器');
-  assert.equal(pianoRes.isCorrection, true);
-  assert.equal(pianoRes.recommendedTrackId, 'gentle-piano');
-
-  const quietRes = analyzeUserPrompt('声音太吵了，换安静一点的');
-  assert.equal(quietRes.isCorrection, true);
-  assert.ok(quietRes.suggestedFollowUps.length >= 2);
 });

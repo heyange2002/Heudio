@@ -14,7 +14,10 @@ test('real Workers runtime bundles QQ API and persists music settings with prote
     const headers = { 'X-Soundisle-Client': 'web', 'Content-Type': 'application/json' };
     let response = await mf.dispatchFetch(base + '/api/music/config', { headers }); assert.equal(response.status, 401);
     response = await mf.dispatchFetch(base + '/api/auth/session', { method: 'POST', headers, body: JSON.stringify({ key: '0648' }) });
-    assert.equal(response.status, 200); headers.Cookie = response.headers.get('Set-Cookie').split(';')[0];
+    assert.equal(response.status, 200);
+    const cookies=response.headers.getSetCookie();assert.equal(cookies.length,2);
+    assert(cookies.some(cookie=>cookie.startsWith('soundisle_music_device=')&&cookie.includes('Max-Age=15552000')));
+    headers.Cookie = cookies.map(cookie=>cookie.split(';')[0]).join('; ');
     response = await mf.dispatchFetch(base + '/api/voice/transcribe', { method: 'POST', headers: { ...headers, 'Content-Type': 'audio/wav' }, body: new Uint8Array(20) }); assert.equal(response.status, 503);
     response = await mf.dispatchFetch(base + '/api/music/stream/' + 'a'.repeat(48), { headers: { Cookie: headers.Cookie, 'Sec-Fetch-Site': 'same-origin' } }); assert.equal(response.status, 410);
     response = await mf.dispatchFetch(base + '/api/music/stream/' + 'a'.repeat(48), { headers: { Cookie: headers.Cookie, 'Sec-Fetch-Site': 'cross-site' } }); assert.equal(response.status, 403);

@@ -5,7 +5,6 @@ import {createRoot} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import {TrackCover} from '../src/components/TrackCover';
 import {TopBar} from '../src/components/TopBar';
-import {workspaceView,type AppSection} from '../src/utils/navigation';
 import {AgentCompanion} from '../src/components/AgentCompanion';
 import {ProviderSettingsModal} from '../src/components/ProviderSettingsModal';
 import {MusicQueue} from '../src/components/MusicQueue';
@@ -43,16 +42,16 @@ test('empty and failed covers use local artwork, consistent across player and vi
  await act(()=>root.render(<TrackCover trackId="song" src="https://album.example/new.jpg" alt="album"/>));assert.equal(document.querySelector('img')!.getAttribute('src'),'https://album.example/new.jpg');
  await act(()=>root.unmount());page.window.close();
 });
-test('all three menu buttons select corresponding views and expose selected state',async()=>{
- const {page,root}=dom();
- function Harness(){const [section,setSection]=useState<AppSection>('home');return <><TopBar activeSection={section} onSelectSection={s=>setSection(s as AppSection)} pureMusicMode={false} onTogglePureMusic={()=>{}} onOpenSettings={()=>{}} onOpenMixer={()=>{}} currentSceneName="专注"/><div id="view">{workspaceView(section,false)}</div></>}
- await act(()=>root.render(<Harness/>));
- for(const [label,view]of [['声音律动','visualizer'],['沉浸歌词','lyrics'],['心境感知','companion']]){
-  const button=[...document.querySelectorAll('nav[aria-label="主要功能"] button')].find(b=>b.textContent?.trim()===label)!;
-  await act(()=>button.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
-  assert.equal(document.getElementById('view')!.textContent,view);assert.equal(button.getAttribute('aria-current'),'page');
- }
- assert.equal(workspaceView('lyrics',true),'music');
+test('settings sits beside music mode and the old navigation is removed',async()=>{
+ const {page,root}=dom();let settings=0,toggles=0,homes=0;
+ await act(()=>root.render(<TopBar onHome={()=>homes++} pureMusicMode={false} onTogglePureMusic={()=>toggles++} onOpenSettings={()=>settings++}/>));
+ assert.equal(document.querySelector('nav'),null);
+ const actions=document.querySelector('[aria-label="播放模式与设置"]')!;
+ const buttons=actions.querySelectorAll('button');assert.match(buttons[0].textContent!,/只听音乐/);assert.equal(buttons[1].textContent,'设置');
+ await act(()=>buttons[0].dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+ await act(()=>buttons[1].dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+ assert.equal(toggles,1);assert.equal(settings,1);
+ assert(!document.body.textContent?.includes('自然音混音'));
  await act(()=>root.unmount());page.window.close();
 });
 
@@ -70,9 +69,10 @@ test('speech controls expose cancel, play and silence states; provider settings 
   await act(()=>cancel.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true}))); assert.equal(spoken.length,1);
   await act(()=>root.render(<AgentCompanion {...props} speechState={{status:'ready',text:props.messages[0].content,error:'语音已准备好'}}/>));assert(document.querySelector('button[aria-label="播放语音"]'));
   await act(()=>root.render(<AgentCompanion {...props} onSpeakMessage={undefined}/>));assert(!document.querySelector('button[aria-label="语音朗读陪伴"]'));
-  function Settings(){const [settings,setSettings]=useState<ServiceSettings>({musicSource:'soundisle-builtin',chatModel:'local-heuristic',voiceTts:'minimax',voiceModel:DEFAULT_SPEECH.model,voiceId:DEFAULT_SPEECH.voiceId,voiceSpeed:0.95,voiceAutoPlay:true,autoAdvance:true,motionEnabled:true,pureMusicMode:false,sleepTimerMinutes:null});return <><ProviderSettingsModal isOpen onClose={()=>{}} settings={settings} onUpdateSettings={next=>setSettings(prev=>({...prev,...next}))}/><output>{JSON.stringify(settings)}</output></>}
+  function Settings(){const [settings,setSettings]=useState<ServiceSettings>({musicSource:'qq-music',chatModel:'local-heuristic',voiceTts:'minimax',voiceModel:DEFAULT_SPEECH.model,voiceId:DEFAULT_SPEECH.voiceId,voiceSpeed:0.95,voiceAutoPlay:true,playbackMode:'sequential',motionEnabled:true,pureMusicMode:false,sleepTimerMinutes:null});return <><ProviderSettingsModal isOpen onClose={()=>{}} settings={settings} onUpdateSettings={next=>setSettings(prev=>({...prev,...next}))}/><output>{JSON.stringify(settings)}</output></>}
   await act(async()=>{root.render(<Settings/>)});
   assert(document.body.textContent?.includes('尚未配置语音服务'));
+  assert(!document.body.textContent?.includes('声屿内建合成源'));
   assert(document.body.textContent?.includes('尚未配置陪伴模型'));
   const model=[...document.querySelectorAll('button')].find(button=>button.textContent?.includes('MiniMax M3'))!;
   await act(()=>model.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));

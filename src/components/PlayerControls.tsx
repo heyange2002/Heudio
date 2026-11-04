@@ -1,6 +1,7 @@
 import { TrackCover } from './TrackCover';
 import React, { useState } from 'react';
-import { MusicTrack } from '../types/music';
+import { PLAYBACK_MODES, nextPlaybackMode } from '../utils/playbackOrder';
+import { MusicTrack, PlaybackMode } from '../types/music';
 import { formatTime } from '../utils/sceneAnalyzer';
 import {
   Play,
@@ -11,11 +12,9 @@ import {
   VolumeX,
   SlidersHorizontal,
   Clock,
-  Sparkles,
-  EyeOff,
   Repeat,
   Repeat1,
-  Music,
+  Shuffle,
 } from 'lucide-react';
 
 interface PlayerControlsProps {
@@ -28,13 +27,9 @@ interface PlayerControlsProps {
   onSeek: (seconds: number) => void;
   volume: number;
   onChangeVolume: (vol: number) => void;
-  autoAdvance: boolean;
-  onToggleAutoAdvance: () => void;
-  motionEnabled: boolean;
-  onToggleMotion: () => void;
-  pureMusicMode: boolean;
-  onTogglePureMusic: () => void;
-  onOpenMixer: () => void;
+  playbackMode: PlaybackMode;
+  onCyclePlaybackMode: () => void;
+  onOpenEqualizer: () => void;
   sleepTimerMinutes: number | null;
   onSetSleepTimer: (mins: number | null) => void;
 }
@@ -49,16 +44,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onSeek,
   volume,
   onChangeVolume,
-  autoAdvance,
-  onToggleAutoAdvance,
-  motionEnabled,
-  onToggleMotion,
-  pureMusicMode,
-  onTogglePureMusic,
-  onOpenMixer,
+  playbackMode,
+  onCyclePlaybackMode,
+  onOpenEqualizer,
   sleepTimerMinutes,
   onSetSleepTimer,
 }) => {
+  const modeLabel = PLAYBACK_MODES.find(mode => mode.id === playbackMode)!.label;
+  const nextLabel = PLAYBACK_MODES.find(mode => mode.id === nextPlaybackMode(playbackMode))!.label;
   const [showTimerMenu, setShowTimerMenu] = useState(false);
   const [prevVolume, setPrevVolume] = useState(volume);
 
@@ -99,14 +92,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         </div>
 
         {/* Controls row */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
           {/* Left: Track Info */}
           <div className="flex items-center gap-3 min-w-0 max-w-[200px] sm:max-w-xs">
             <TrackCover
               trackId={currentTrack.id}
               src={currentTrack.coverUrl}
               alt={currentTrack.title}
-                className="w-11 h-11 rounded-lg object-cover border border-stone-800 shrink-0"
+                className="hidden sm:block w-11 h-11 rounded-lg object-cover border border-stone-800 shrink-0"
             />
             <div className="min-w-0">
               <h4 className="text-sm font-semibold text-stone-100 truncate">
@@ -119,17 +112,17 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           </div>
 
           {/* Center: Main Playback Buttons */}
-          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            {/* Auto advance restriction toggle */}
+          <div className="flex items-center gap-1 sm:gap-4 shrink-0">
+            {/* Playback mode cycle */}
             <button
-              onClick={onToggleAutoAdvance}
-              title={autoAdvance ? '自动连播下一首 (点击限制自动切歌)' : '已限制自动切歌 (单曲流)'}
-              aria-label={autoAdvance ? '限制自动切歌' : '开启自动切歌'}
-              className={`p-2 rounded-lg text-xs transition-colors hidden sm:flex items-center ${
-                autoAdvance ? 'text-stone-400 hover:text-stone-200' : 'text-amber-400 bg-amber-400/10'
+              onClick={onCyclePlaybackMode}
+              title={`${modeLabel} · 点击切换为${nextLabel}`}
+              aria-label={`播放模式：${modeLabel}，点击切换为${nextLabel}`}
+              className={`p-2 rounded-lg text-xs transition-colors flex items-center gap-1 ${
+                playbackMode === 'sequential' ? 'text-stone-400 hover:text-stone-200' : 'text-amber-400 bg-amber-400/10'
               }`}
             >
-              {autoAdvance ? <Repeat className="w-4 h-4" /> : <Repeat1 className="w-4 h-4" />}
+              {playbackMode === 'shuffle' ? <Shuffle className="w-4 h-4" /> : playbackMode === 'repeat-one' ? <Repeat1 className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}<span className="hidden xl:inline">{modeLabel}</span>
             </button>
 
             <button
@@ -156,30 +149,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
               <SkipForward className="w-5 h-5" />
             </button>
 
-            {/* Motion toggle */}
-            <button
-              onClick={onToggleMotion}
-              title={motionEnabled ? '关闭音频动效' : '开启音频动效'}
-              aria-label={motionEnabled ? '关闭动效' : '开启律动'}
-              className={`p-2 rounded-lg text-xs transition-colors hidden sm:flex items-center ${
-                motionEnabled ? 'text-stone-400 hover:text-stone-200' : 'text-amber-400 bg-amber-400/10'
-              }`}
-            >
-              {motionEnabled ? <EyeOff className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-            </button>
           </div>
 
-          {/* Right: Sound Mix, Sleep Timer, Volume */}
+          {/* Right: Equalizer, Sleep Timer, Volume */}
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            {/* Ambient Mixer button */}
+            {/* Equalizer button */}
             <button
-              onClick={onOpenMixer}
-              title="打开自然声景混音"
-              aria-label="打开自然声景混音"
+              onClick={onOpenEqualizer}
+              title="打开 EQ 声场"
+              aria-label="打开 EQ 声场"
               className="p-2 text-stone-400 hover:text-stone-200 hover:bg-stone-800/60 rounded-lg transition-colors flex items-center gap-1.5"
             >
               <SlidersHorizontal className="w-4 h-4" />
-              <span className="text-xs hidden md:inline">声景</span>
+              <span className="text-xs hidden md:inline">EQ 声场</span>
             </button>
 
             {/* Sleep Timer button */}

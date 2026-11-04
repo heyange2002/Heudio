@@ -5,7 +5,7 @@ const key='0427';
 function call(gate, changes={}) {
  const req={headers:{'x-soundisle-client':'web'},socket:{remoteAddress:'127.0.0.1'},ip:'127.0.0.1',secure:false,protocol:'http',path:'/agent/chat',method:'POST',body:{},get:()=> 'localhost:3000',is:v=>v==='application/json',...changes};
  const result={status:200,headers:{},next:false,body:null};
- const res={status(n){result.status=n;return this},json(body){result.body=body;return this},setHeader(k,v){result.headers[k]=v}};
+ const res={status(n){result.status=n;return this},json(body){result.body=body;return this},setHeader(k,v){result.headers[k]=Array.isArray(v)?v.join('; '):v; if(k==='Set-Cookie')result.cookies=Array.isArray(v)?v:[v]}};
  gate(req,res,()=>result.next=true);return result;
 }
 test('key required; missing/wrong keys never grant access',()=>{
@@ -49,4 +49,32 @@ test('native audio may omit custom headers only for authenticated same-origin op
  assert.equal(call(gate,{path,method:'GET',headers:{cookie,'sec-fetch-site':'cross-site'}}).status,403);
  assert.equal(call(gate,{path,method:'GET',headers:{}}).status,401);
  assert.equal(call(gate,{path:'/music/config',method:'GET',headers:{cookie}}).status,403);
+});
+
+test('music identity survives unlock renewal, logout, expiry and server restart without bypassing access control',()=>{
+ let time=100;let gate=createSecurity({key,ttl:1000,now:()=>time});
+ const login=call(gate,{path:'/auth/session',body:{key},secure:true,protocol:'https'});
+ const device=login.cookies.find(c=>c.startsWith('soundisle_music_device='));
+ assert.match(device,/HttpOnly; SameSite=Strict; Path=\/api; Max-Age=15552000; Secure/);
+ const deviceCookie=device.split(';')[0];
+ const sessionCookie=login.cookies[0].split(';')[0];
+ time=1200;
+ assert.equal(call(gate,{headers:{'x-soundisle-client':'web',cookie:deviceCookie}}).status,401);
+ const again=call(gate,{path:'/auth/session',body:{key},headers:{'x-soundisle-client':'web',cookie:deviceCookie}});
+ assert.equal(again.cookies[1].split(';')[0],deviceCookie);
+ assert.notEqual(again.cookies[0].split(';')[0],sessionCookie);
+ const loggedOut=call(gate,{path:'/auth/session',method:'DELETE',headers:{'x-soundisle-client':'web',cookie:again.cookies[0].split(';')[0]+'; '+deviceCookie}});
+ assert(!loggedOut.cookies.some(c=>c.startsWith('soundisle_music_device=')));
+ gate=createSecurity({key});
+ const restarted=call(gate,{path:'/auth/session',body:{key},headers:{'x-soundisle-client':'web',cookie:deviceCookie}});
+ assert.equal(restarted.cookies[1].split(';')[0],deviceCookie);
+});
+
+test('existing authenticated browsers gain a stable identity using the legacy session',()=>{
+ const gate=createSecurity({key});const login=call(gate,{path:'/auth/session',body:{key}});
+ const old=login.cookies[0].split(';')[0];
+ const result=call(gate,{path:'/auth/session',method:'GET',headers:{'x-soundisle-client':'web',cookie:old}});
+ assert.equal(result.body.authenticated,true);
+ assert.equal(result.cookies[0].split(';')[0],'soundisle_music_device='+old.split('=')[1]);
+ assert.equal(call(gate,{path:'/auth/session',method:'GET'}).cookies,undefined);
 });

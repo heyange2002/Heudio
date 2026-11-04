@@ -99,7 +99,6 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {[
-              { id: 'soundisle-builtin', title: '声屿内建合成源', desc: '432Hz自适应Web Audio纯净渲染' },
               { id: 'qq-music', title: 'QQ 音乐', desc: '搜索、个人推荐与阿屿编排歌单' },
             ].map((item) => (
               <button
@@ -205,35 +204,14 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
             <span>自主控制权开关</span>
           </label>
           <div className="space-y-2.5 text-xs">
-            <label className="flex items-center justify-between p-3 rounded-xl bg-stone-800/50 border border-stone-800 hover:bg-stone-800/80 cursor-pointer transition-colors">
-              <div>
-                <span className="font-medium text-stone-200 block">限制自动切歌 (单曲驻留)</span>
-                <span className="text-stone-400 text-[11px] block mt-0.5">
-                  开启后当前曲目结束不再自动跳到下一首，保持相同氛围循环
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={!settings.autoAdvance}
-                onChange={(e) => onUpdateSettings({ autoAdvance: !e.target.checked })}
-                className="w-4 h-4 rounded text-amber-400 accent-amber-400 bg-stone-700 border-stone-600"
-              />
+            <label className="block p-3 rounded-xl bg-stone-800/50 border border-stone-800">
+              <span className="font-medium text-stone-200 block mb-2">播放模式</span>
+              <select aria-label="播放模式" value={settings.playbackMode} onChange={e => onUpdateSettings({ playbackMode: e.target.value as ServiceSettings['playbackMode'] })} className="w-full rounded-lg border border-stone-700 bg-stone-900 p-2">
+                <option value="sequential">顺序播放</option><option value="shuffle">随机播放</option><option value="repeat-one">单曲循环</option>
+              </select>
             </label>
 
-            <label className="flex items-center justify-between p-3 rounded-xl bg-stone-800/50 border border-stone-800 hover:bg-stone-800/80 cursor-pointer transition-colors">
-              <div>
-                <span className="font-medium text-stone-200 block">开启律动动画 (音频响应动效)</span>
-                <span className="text-stone-400 text-[11px] block mt-0.5">
-                  关闭后切换为极简静态留白模式，保护专注度与降低电量
-                </span>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.motionEnabled}
-                onChange={(e) => onUpdateSettings({ motionEnabled: e.target.checked })}
-                className="w-4 h-4 rounded text-amber-400 accent-amber-400 bg-stone-700 border-stone-600"
-              />
-            </label>
+
           </div>
         </div>
 

@@ -44,3 +44,56 @@ test('weather uses explicit city and real provider readings, and handles missing
   assert.equal(result.summary, '测试市 · 雨 19°C'); assert.equal(result.available, true);
   const failed = await getWeather('unknown-test-city', async () => { throw Error('offline'); }); assert.equal(failed.available, false);
 });
+
+test('QQ grant survives changing the app session and reconstructing the store, while other browsers stay isolated',async()=>{
+ const state=store();let token;
+ const browser='a'.repeat(64);
+ const browserRequest=(app,device=browser)=>new Request('https://soundisle.test/api/music/login/status',{headers:{Cookie:`soundisle_session=${app}; soundisle_music_device=${device}`}});
+ const deps={handleRequest:async req=>{
+   token=req.headers.get('X-QQ-Session');
+   if(new URL(req.url).pathname==='/login/qr/check')return Response.json({code:803,data:{token:'saved-grant'}});
+   return Response.json({code:200,data:{profile:token?{name:'QQ用户'}:undefined}});
+ }};
+ let client=await createMusicClient(browserRequest('first'),{},state,deps);await client.call('/login/qr/check');
+ const restored=store();for(const [k,v] of JSON.parse(JSON.stringify([...state.map])))restored.map.set(k,v);
+ client=await createMusicClient(browserRequest('after-restart'),{},restored,deps);
+ assert((await client.call('/login/status')).data.profile);assert.equal(token,'saved-grant');
+ client=await createMusicClient(browserRequest('another-browser','b'.repeat(64)),{},restored,deps);await client.call('/login/status');assert.equal(token,null);
+ client=await createMusicClient(browserRequest('new-unlock'),{},restored,deps);await client.call('/logout');
+ client=await createMusicClient(browserRequest('later'),{},restored,deps);await client.call('/login/status');assert.equal(token,null);
+});
+
+test('status without a profile and transient refresh failures retain the grant; unchanged config does not log out',async()=>{
+ const state=store();let fail=false;
+ const deps={handleRequest:async req=>{
+   const path=new URL(req.url).pathname;
+   if(path==='/login/qr/check')return Response.json({code:803,data:{token:'still-valid'}});
+   if(path==='/login/refresh'&&fail)throw Error('network');
+   return Response.json({code:200,data:{}});
+ }};
+ let client=await createMusicClient(request(),{},state,deps);await client.call('/login/qr/check');
+ const key=[...state.map.keys()][0];state.map.get(key).nextRefreshAt=0;fail=true;
+ await client.call('/login/status');assert.equal(state.map.get(key).token,'still-valid');
+ assert(state.map.get(key).nextRefreshAt>Date.now());
+ const cfg=new Request('https://soundisle.test/api/music/config',{method:'PUT',headers:{Cookie:'soundisle_session=user-a','Content-Type':'application/json'},body:JSON.stringify({mode:'embedded'})});
+ assert.equal((await musicRoute(cfg,{},state,deps)).status,200);assert.equal(state.map.get(key).token,'still-valid');
+});
+
+test('background renewal saves rotated tokens and provider expiry without an open browser; logout wins an in-flight renewal',async()=>{
+ const {refreshSavedMusicSessions}=await import('../cloudflare/music.mjs');
+ const state=store();state.keys=async prefix=>[...state.map.keys()].filter(k=>k.startsWith(prefix));
+ const key='qq:session:stored';state.map.set(key,{token:'old',expires:Date.now()+86400000,nextRefreshAt:0});
+ const expiresAt=Date.now()+2*86400000;
+ await refreshSavedMusicSessions({},state,{handleRequest:async req=>{assert.equal(req.method,'POST');assert.equal(req.headers.get('X-QQ-Session'),'old');return Response.json({code:200,data:{token:'rotated',expiresAt}});}});
+ assert.equal(state.map.get(key).token,'rotated');assert.equal(state.map.get(key).expires,expiresAt);
+ state.map.get(key).nextRefreshAt=0;
+ await refreshSavedMusicSessions({},state,{handleRequest:async()=>{await state.delete(key);return Response.json({code:200,data:{token:'must-not-resurrect',expiresAt}});}});
+ assert.equal(state.map.has(key),false);
+});
+
+test('explicit QQ logout clears the saved grant even if the upstream is unreachable',async()=>{
+ const state=store();let fail=false;
+ const deps={handleRequest:async()=>{if(fail)throw Error('offline');return Response.json({code:803,data:{token:'private-grant'}});}};
+ const client=await createMusicClient(request(),{},state,deps);await client.call('/login/qr/check');assert.equal(state.map.size,1);
+ fail=true;await assert.rejects(client.call('/logout'));assert.equal(state.map.size,0);
+});
