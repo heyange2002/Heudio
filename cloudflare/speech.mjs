@@ -15,7 +15,7 @@ export async function synthesizeSpeech(body, env, fetchImpl = fetch, signal) {
     return error('音色、模型或语速设置无效', 400);
   }
   const key = env.MINIMAX_API_KEY?.trim();
-  if (!key) return error('MiniMax 语音尚未配置，请在后端设置 MINIMAX_API_KEY', 503);
+  if (!key) return error('MiniMax 语音尚未配置，请在设置中填写 MiniMax API Key', 503);
   const controller = new AbortController();
   const cancel = () => controller.abort();
   signal?.addEventListener('abort', cancel, { once: true });

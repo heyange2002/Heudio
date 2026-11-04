@@ -3,6 +3,7 @@ import { apiFetch } from '../api';
 import { SPEECH_MODELS, SPEECH_VOICES } from '../../shared/speech.mjs';
 import { ServiceSettings } from '../types/music';
 import { QQMusicSettings } from './QQMusicSettings';
+import { MiniMaxKeySettings } from './MiniMaxKeySettings';
 import { CompanionProfile } from './CompanionProfile';
 import { DEFAULT_AGENT_PROMPT, MAX_AGENT_PROMPT_LENGTH } from '../../shared/agent-policy.mjs';
 import type { CompanionProfile as Profile } from '../utils/music';
@@ -36,9 +37,12 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
   const [tab, setTab] = useState<'services' | 'personal' | 'agent'>('services');
   const [modelStatus, setModelStatus] = useState('正在检查陪伴模型…');
   const [voiceStatus, setVoiceStatus] = useState('正在检查语音服务…');
+  const [keyEditable, setKeyEditable] = useState(false);
+  const [keyConfigured, setKeyConfigured] = useState(false);
   useEffect(() => {
     if (!isOpen) return;
     const controller = new AbortController();
+    setKeyEditable(false);
     setModelStatus('正在检查陪伴模型…');
     apiFetch('/api/agent/config', { signal: controller.signal }).then(async response => {
       if (!response.ok) throw Error();
@@ -49,7 +53,11 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
     apiFetch('/api/voice/config', { signal: controller.signal }).then(async response => {
       if (!response.ok) throw Error();
       const config = await response.json();
-      if (!controller.signal.aborted) setVoiceStatus(config.configured ? 'MiniMax 已配置 · AI 合成声音' : '尚未配置语音服务，请在后端设置 MiniMax API Key');
+      if (!controller.signal.aborted) {
+        setKeyEditable(config.keyEditable === true);
+        setKeyConfigured(config.configured === true);
+        setVoiceStatus(config.configured ? 'MiniMax 已配置 · AI 合成声音' : '尚未配置语音服务，请配置 MiniMax API Key');
+      }
     }).catch(() => { if (!controller.signal.aborted) setVoiceStatus('暂时无法确认语音服务状态，请检查连接'); });
     return () => controller.abort();
   }, [isOpen]);
@@ -118,6 +126,11 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
         </div>
 
         <QQMusicSettings/>
+        {keyEditable && <MiniMaxKeySettings configured={keyConfigured} onConfigured={configured => {
+          setKeyConfigured(configured);
+          setModelStatus(configured ? 'MiniMax M3 已配置' : '尚未配置陪伴模型，当前使用规则回复');
+          setVoiceStatus(configured ? 'MiniMax 已配置 · AI 合成声音' : '尚未配置语音服务，请配置 MiniMax API Key');
+        }}/>}
 
         {/* 2. Chat Model Provider */}
         <div className="space-y-2.5">

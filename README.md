@@ -1,10 +1,30 @@
-# 声屿 SoundIsle
+# 声屿 SoundIsle PC 版
 
 React 音乐伴侣：内置「阿屿」陪伴 Agent，通过 QQ 音乐搜索和个人推荐编排播放队列，结合时间、天气、音乐偏好与工作状态选歌，并用 MiniMax 语音交流。
 
-## 本机运行
+## PC 版本
 
-需要 Node.js。安装依赖 `npm ci`，复制 `.env.example` 为 `.env`，设置4位数字的 `APP_ACCESS_KEY`，运行 `npm run dev`。默认访问 http://127.0.0.1:3000 并使用访问码解锁，支持以0开头。
+当前产品版本定义为 **PC 端 1.0.0**，沿用现有音乐、阿屿陪伴、语音和 EQ 功能，通过 Electron 提供桌面窗口。支持 macOS、Windows 和 Linux，桌面窗口最小尺寸为 1100 × 720。
+
+- 开发启动：`npm ci` 后运行 `npm run pc:dev`（构建当前界面后启动；修改代码后需重新运行）。
+- 已构建启动：`npm run pc:start`。
+- 生成本机可运行应用目录：`npm run pc:pack`。
+- 生成当前系统安装包：`npm run pc:dist`，产物位于 `release/`。macOS 为 DMG / ZIP，Windows 为 NSIS，Linux 为 AppImage；建议在各目标系统分别打包。
+- 桌面集成检查：`npm run test:desktop`，使用临时用户目录启动真实 Electron 窗口并检查页面、本地 API 和渲染进程隔离。
+
+桌面版内置本地后端，无需另启服务或安装 Node.js（开发和打包仍需要 Node.js）。启动后直接进入播放器，无需4位访问码，也不显示锁定入口。开发首次启动时会从项目 `.env` 导入 MiniMax Key。
+
+MiniMax Key 在「设置 → 音乐与语音 → MiniMax API Key」填写，支持保存、替换与移除，立即生效并在重启后保留；对话、语音识别与朗读共用。Key 仅保存于 Electron 用户目录的 `data/minimax-settings.json`，不会回显到页面或写入浏览器存储。设置中保存的值优先于旧 `.env`，移除后不会自动恢复旧 Key。已配置状态表示存在 Key，实际可用性取决于账户权限和额度。QQ 授权记录和会话密钥保存在同一用户目录的 `data/`，播放进度、EQ 和个人设置保存在桌面浏览器存储中。菜单可打开数据目录；安装包不包含项目 `.env`、`.data` 或开发密钥。桌面版和现有网页的浏览器存储相互独立，不自动迁移授权。
+
+本地服务仅监听 `127.0.0.1`，首次分配空闲端口并保存到 `server-port`，后续复用以保留浏览器设置。端口被占用时会提示启动失败；删除 `server-port` 可重新分配，但将切换浏览器存储来源。桌面本地连接允许回环 HTTP，网页生产部署仍要求 HTTPS 和访问码。
+
+麦克风仅对应用自身的本地页面开放，外部导航和新窗口被拦截。关闭最后一个窗口时 Windows / Linux 退出，macOS 可通过 Dock 重新打开；完全退出时结束本地后端。
+
+macOS 构建默认使用本地临时签名，尚未配置发布证书签名、公证或自动更新；正式对外发布前需补充平台签名凭据。
+
+## 网页开发与运行
+
+需要 Node.js 22.12+。安装依赖 `npm ci`，复制 `.env.example` 为 `.env`，设置4位数字的 `APP_ACCESS_KEY`，运行 `npm run dev`。默认访问 http://127.0.0.1:3000 并使用访问码解锁，支持以0开头。
 
 陪伴模型使用 MiniMax M3，与 MiniMax 语音共用后端 MINIMAX_API_KEY。未配置或模型调用失败时使用规则回复；设置页显示配置状态，选择离线引擎时不调用模型。
 

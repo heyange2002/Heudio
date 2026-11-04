@@ -1,10 +1,12 @@
 # MiniMax 语音输出
 
-已用 MiniMax 替换浏览器系统朗读。Express 与 Cloudflare Workers 复用后端实现，沿用访问 Key 登录、同源 Cookie 和 HTTPS。MiniMax API Key 不会进入网页。
+已用 MiniMax 替换浏览器系统朗读。Express 与 Cloudflare Workers 复用后端实现，网页版沿用访问 Key 登录、同源 Cookie 和 HTTPS；PC 版直接进入，使用本地同源会话。已保存的 MiniMax API Key 不会通过配置接口返回页面。
 
 ## 配置
 
-本机 Express：在被 Git 忽略的 `.env` 中设置 `MINIMAX_API_KEY`，重启 `npm run dev`。原有 `APP_ACCESS_KEY` 仍为必填。
+PC 版：打开「设置 → 音乐与语音 → MiniMax API Key」，填写并保存，即刻生效；可替换或移除，重启后保留。保存仅表示配置完成，需成功调用才能确认 Key 权限及账户额度。
+
+本机 Express 网页版：在被 Git 忽略的 `.env` 中设置 `MINIMAX_API_KEY`，重启 `npm run dev`。原有 `APP_ACCESS_KEY` 仍为必填。
 
 本机 Workers：在被忽略的 `.dev.vars` 中添加 `MINIMAX_API_KEY`，运行 `npm run cf:dev`。
 

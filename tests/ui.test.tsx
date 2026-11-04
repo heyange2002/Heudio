@@ -18,6 +18,17 @@ function dom(){
  Object.assign(globalThis,{window:page.window,document:page.window.document,IS_REACT_ACT_ENVIRONMENT:true});
  return {page,root:createRoot(document.getElementById('root')!)};
 }
+test('desktop opens directly and never renders access code or lock controls', async () => {
+ const {page,root}=dom(),oldFetch=globalThis.fetch;
+ Object.defineProperty(globalThis,'location',{value:page.window.location,configurable:true});
+ globalThis.fetch=async()=>Response.json({authenticated:true,desktop:true});
+ try {
+  await act(async()=>root.render(<AccessGate><p>PC 播放器</p></AccessGate>));
+  assert(document.body.textContent?.includes('PC 播放器'));
+  assert(!document.querySelector('input'));
+  assert(!document.body.textContent?.includes('锁定访问'));
+ } finally { await act(()=>root.unmount());page.window.close();globalThis.fetch=oldFetch; }
+});
 test('the access screen asks for a masked four-digit numeric code and blocks incomplete submissions',async()=>{
  const {page,root}=dom(),oldFetch=globalThis.fetch;let posts=0;
  Object.defineProperty(globalThis,'location',{value:page.window.location,configurable:true});

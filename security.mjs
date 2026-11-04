@@ -4,10 +4,10 @@ import { musicIdentityCookie } from './shared/music-identity.mjs';
 import { isAccessCode } from './shared/access-code.mjs';
 
 // Authentication secrets never enter the frontend bundle. TLS handles encryption.
-export function createSecurity({ key, production = false, ttl = 3600000, now = Date.now }) {
-  if (!isAccessCode(key)) throw Error('APP_ACCESS_KEY must contain exactly 4 digits');
+export function createSecurity({ key, production = false, desktop = false, ttl = 3600000, now = Date.now }) {
+  if (!desktop && !isAccessCode(key)) throw Error('APP_ACCESS_KEY must contain exactly 4 digits');
   const digest = value => createHash('sha256').update(value).digest();
-  const expected = digest(key), sessions = new Map(), attempts = new Map();
+  const expected = digest(desktop ? randomBytes(32) : key), sessions = new Map(), attempts = new Map();
   const cookie = 'soundisle_session';
   const deny = (res, status, error) => res.status(status).json({ error });
   const tokenOf = req => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(cookie + '='))?.slice(cookie.length + 1);
@@ -18,6 +18,7 @@ export function createSecurity({ key, production = false, ttl = 3600000, now = D
   function middleware(req, res, next) {
     prune();
     const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    if (desktop && !loopback) return deny(res, 403, '请求来源无效');
     if (!req.secure && (production || !loopback)) return deny(res, 426, '请通过 HTTPS 连接服务');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -28,8 +29,14 @@ export function createSecurity({ key, production = false, ttl = 3600000, now = D
     if (origin && origin !== `${req.protocol}://${req.get('host')}`) return deny(res, 403, '请求来源无效');
     const id = tokenOf(req), authenticated = id && sessions.has(id);
     if (req.path === '/auth/session' && req.method === 'GET') {
+      if (desktop && !authenticated) {
+        const fresh = randomBytes(32).toString('hex');
+        sessions.set(fresh, now() + ttl);
+        res.setHeader('Set-Cookie', [`${cookie}=${fresh}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${Math.floor(ttl / 1000)}`, musicIdentityCookie(req.headers.cookie, req.secure)]);
+        return res.json({ authenticated: true, desktop: true });
+      }
       if (authenticated) res.setHeader('Set-Cookie', musicIdentityCookie(req.headers.cookie, req.secure));
-      return res.json({ authenticated: !!authenticated });
+      return res.json({ authenticated: !!authenticated, ...(desktop ? { desktop: true } : {}) });
     }
     if (req.path === '/auth/session' && req.method === 'POST') {
       const ip = req.ip || req.socket.remoteAddress;

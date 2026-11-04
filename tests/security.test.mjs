@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSecurity } from '../security.mjs';
 const key='0427';
+test('desktop enters directly without an access code while preserving same-origin and loopback checks', () => {
+ const gate = createSecurity({ desktop: true });
+ const request = { path: '/auth/session', method: 'GET' };
+ const session = call(gate, request);
+ assert.deepEqual(session.body, { authenticated: true, desktop: true });
+ assert.match(session.headers['Set-Cookie'], /HttpOnly; SameSite=Strict/);
+ const cookie = session.cookies[0].split(';')[0];
+ assert.equal(call(gate, { headers: { 'x-soundisle-client': 'web', cookie } }).next, true);
+ assert.equal(call(gate, { ...request, headers: {} }).status, 403);
+ assert.equal(call(gate, { ...request, headers: { 'x-soundisle-client': 'web', 'sec-fetch-site': 'cross-site' } }).status, 403);
+ assert.equal(call(gate, { ...request, socket: { remoteAddress: '192.0.2.1' } }).status, 403);
+ assert.equal(call(createSecurity({ key }), request).body.authenticated, false);
+});
 function call(gate, changes={}) {
  const req={headers:{'x-soundisle-client':'web'},socket:{remoteAddress:'127.0.0.1'},ip:'127.0.0.1',secure:false,protocol:'http',path:'/agent/chat',method:'POST',body:{},get:()=> 'localhost:3000',is:v=>v==='application/json',...changes};
  const result={status:200,headers:{},next:false,body:null};

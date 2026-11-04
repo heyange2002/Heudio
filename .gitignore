@@ -13,3 +13,7 @@ coverage/
 !.dev.vars.example
 
 .data/
+
+# Electron build outputs
+desktop/
+release/
