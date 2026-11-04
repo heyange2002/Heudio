@@ -7,13 +7,15 @@ class SoundIsleAudioEngine {
   private playbackController?: AbortController;
   private volume = 0.85;
   private ducked = false;
+  private inputMuted = false;
+  public setInputMuted(active: boolean) { this.inputMuted = active; this.applyVolume(); }
   private onStartedCallback?: (track: MusicTrack) => void;
   public onStarted(callback: (track: MusicTrack) => void) { this.onStartedCallback = callback; }
   private onErrorCallback?: (message: string) => void;
   public onError(callback: (message: string) => void) { this.onErrorCallback = callback; }
   public setSpeechDucking(active: boolean) { this.ducked = active; this.applyVolume(); }
   private applyVolume() {
-    const volume = this.volume * (this.ducked ? 0.25 : 1);
+    const volume = this.inputMuted ? 0 : this.volume * (this.ducked ? 0.3 : 1);
     if (this.remoteAudio) this.remoteAudio.volume = volume;
     if (this.masterGain && this.ctx) this.masterGain.gain.setValueAtTime(volume, this.ctx.currentTime);
   }
@@ -25,15 +27,18 @@ class SoundIsleAudioEngine {
       if (!response.ok) throw Error(data.error || '无法获取播放链接，请检查 QQ 授权');
       const entry = data.data?.playUrl?.[track.qqMid!];
       if (!entry?.url) throw Error('这首歌暂时没有可用的播放链接，可以换一首试试');
-      const url = new URL(entry.url);
-      if (url.protocol === 'http:' && /(?:^|\.)qq\.com$/.test(url.hostname)) url.protocol = 'https:';
-      if (url.protocol !== 'https:' || url.username || url.password) throw Error('音乐播放链接格式无效');
+      const url = new URL(entry.url, location.href);
+      if (url.origin !== location.origin || !/^\/api\/music\/stream\/[a-f0-9]{48}$/.test(url.pathname) || url.search || url.hash) throw Error('音乐服务仍在返回旧版播放链接，请更新后端后重试');
       if (generation !== this.playGeneration) return;
       const audio = new Audio(url.toString()); this.remoteAudio = audio;
       audio.currentTime = start; this.applyVolume();
       audio.ontimeupdate = () => { if (generation === this.playGeneration) { this.elapsedSeconds = audio.currentTime; this.onTimeUpdateCallback?.(audio.currentTime); } };
       audio.onended = () => { if (generation === this.playGeneration) { this.isPlaying = false; this.onTrackEndedCallback?.(); } };
-      audio.onerror = () => { if (generation === this.playGeneration) { this.pause(); this.onErrorCallback?.('歌曲播放失败，请重试或换一首歌'); } };
+      audio.onerror = () => { if (generation === this.playGeneration) {
+        const code = audio.error?.code;
+        this.pause();
+        this.onErrorCallback?.(code === 3 ? '浏览器无法解码这首歌的音频，请换一首歌' : '音乐下载连接失败，请重试以重新获取可用的 HTTPS 播放线路');
+      } };
       await audio.play();
       if (generation !== this.playGeneration) audio.pause();
       else this.onStartedCallback?.(track);

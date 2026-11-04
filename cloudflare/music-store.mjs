@@ -15,7 +15,7 @@ export class MusicStore {
     return Response.json({ ok: true });
   }
   async alarm() {
-    const records = await this.ctx.storage.list({ prefix: 'qq:session:' });
+    const records = new Map([...(await this.ctx.storage.list({ prefix: 'qq:session:' })), ...(await this.ctx.storage.list({ prefix: 'media:' }))]);
     const expired = [...records].filter(([,v]) => v.expires <= Date.now()).map(([k]) => k);
     if (expired.length) await this.ctx.storage.delete(expired);
     if (records.size > expired.length) await this.ctx.storage.setAlarm(Date.now() + 86400000);

@@ -1,6 +1,10 @@
 import { musicRoute, createMusicClient } from './cloudflare/music.mjs';
 import { getWeather } from './cloudflare/context.mjs';
 import { randomBytes } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { transcribeSpeech } from './cloudflare/transcribe.mjs';
+import { MAX_VOICE_BYTES } from './shared/wav.mjs';
+import { pipeline } from 'node:stream/promises';
 import { companionChat, companionConfig } from './cloudflare/companion.mjs';
 import { speechConfig, synthesizeSpeech } from './cloudflare/speech.mjs';
 import express from 'express';
@@ -24,6 +28,10 @@ if (process.env.TRUST_LOOPBACK_PROXY === 'true') app.set('trust proxy', 'loopbac
 
 app.use((req, res, next) => {
   if (production && !req.secure) return res.status(426).send('请通过 HTTPS 访问');
+  // Never allow development static serving to expose private local state.
+  let pathname = req.path;
+  try { for (let i=0;i<2;i++) pathname=decodeURIComponent(pathname); } catch { return res.sendStatus(400); }
+  if (pathname.split('/').some(part => part.startsWith('.') && part !== '.well-known')) return res.sendStatus(404);
   next();
 });
 app.use(express.json({ limit: '64kb' }));
@@ -37,15 +45,28 @@ const persistMusic = () => { fs.writeFileSync(stateFile + '.tmp', JSON.stringify
 if (!musicState['qq:secret']) { musicState['qq:secret'] = randomBytes(32).toString('hex'); persistMusic(); }
 const musicEnv = { ...process.env, QQ_SESSION_SECRET: process.env.QQ_SESSION_SECRET || musicState['qq:secret'] };
 const musicStore = { get: async (key: string) => musicState[key], put: async (key: string, value: unknown) => { musicState[key] = value; persistMusic(); }, delete: async (key: string) => { delete musicState[key]; persistMusic(); } };
-const webRequest = (req: express.Request) => new Request(`${req.protocol}://${req.get('host')}${req.originalUrl}`, { method: req.method, headers: { Cookie: req.headers.cookie || '', 'Content-Type': 'application/json' }, ...(['POST','PUT'].includes(req.method) ? { body: JSON.stringify(req.body) } : {}) });
+const webRequest = (req: express.Request, signal?: AbortSignal) => new Request(`${req.protocol}://${req.get('host')}${req.originalUrl}`, { method: req.method, signal, headers: { Cookie: req.headers.cookie || '', 'Content-Type': 'application/json', ...(req.headers.range ? { Range: req.headers.range } : {}) }, ...(['POST','PUT'].includes(req.method) ? { body: JSON.stringify(req.body) } : {}) });
 app.use('/api/music', async (req, res) => {
-  const result = await musicRoute(webRequest(req), musicEnv, musicStore);
-  result.headers.forEach((value, key) => res.setHeader(key, value));
-  res.status(result.status).send(Buffer.from(await result.arrayBuffer()));
+  const controller = new AbortController(); const cancel = () => controller.abort(); res.on('close', cancel);
+  try {
+    const result = await musicRoute(webRequest(req, controller.signal), musicEnv, musicStore);
+    result.headers.forEach((value, key) => res.setHeader(key, value)); res.status(result.status);
+    if (!result.body || req.method === 'HEAD') res.end();
+    else await pipeline(Readable.fromWeb(result.body as any), res);
+  } catch { if (!res.headersSent) res.status(502).json({ error: '音乐下载中断，请重试' }); else res.destroy(); }
+  finally { res.off('close', cancel); }
 });
 app.get('/api/context/weather', async (req, res) => res.json(await getWeather(req.query.city)));
 
 app.get('/api/voice/config', (_req, res) => res.json(speechConfig(process.env)));
+app.post('/api/voice/transcribe', express.raw({type:'audio/wav',limit:MAX_VOICE_BYTES}), async (req,res) => {
+  const controller=new AbortController(); const cancel=()=>controller.abort(); res.on('close',cancel);
+  try {
+    const request=new Request(`${req.protocol}://${req.get('host')}${req.originalUrl}`,{method:'POST',headers:{'Content-Type':req.headers['content-type']||''},body:Buffer.isBuffer(req.body)?new Uint8Array(req.body).buffer:undefined,signal:controller.signal});
+    const result=await transcribeSpeech(request,process.env);
+    if(!res.destroyed){result.headers.forEach((value,key)=>res.setHeader(key,value));res.status(result.status).send(Buffer.from(await result.arrayBuffer()));}
+  }finally{res.off('close',cancel);}
+});
 app.post('/api/voice/synthesize', async (req, res) => {
   const controller = new AbortController();
   const cancel = () => controller.abort();

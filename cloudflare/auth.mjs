@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { isAccessCode } from '../shared/access-code.mjs';
 const digest = value => createHash('sha256').update(value).digest('hex');
 const response = (body,status=200,headers={}) => Response.json(body,{status,headers:{'Cache-Control':'no-store',...headers}});
 const tokenOf = request => (request.headers.get('Cookie')||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('soundisle_session='))?.slice(18);
@@ -6,7 +7,7 @@ export class AuthStore {
   constructor(ctx,env){this.ctx=ctx;this.env=env;}
   async fetch(request){
     const key=this.env.APP_ACCESS_KEY;
-    if(!key||key.length<32)return response({error:'服务尚未配置访问 Key'},503);
+    if(!isAccessCode(key))return response({error:'服务尚未配置4位数字访问码'},503);
     const store=this.ctx.storage,now=Date.now(),fingerprint=digest(key);
     const token=tokenOf(request),record=token?await store.get('session:'+digest(token)):null;
     const authenticated=!!(record&&record.expires>now&&record.fingerprint===fingerprint);
@@ -25,7 +26,7 @@ export class AuthStore {
     await store.setAlarm(now+3600000);
     if(!allowed)return response({error:'尝试次数过多，请一分钟后重试'},429);
     const body=await request.json();
-    if(typeof body.key!=='string'||body.key.length>4096||!timingSafeEqual(Buffer.from(digest(body.key),'hex'),Buffer.from(fingerprint,'hex')))return response({error:'访问 Key 不正确'},401);
+    if(!isAccessCode(body.key)||!timingSafeEqual(Buffer.from(digest(body.key),'hex'),Buffer.from(fingerprint,'hex')))return response({error:'访问码不正确，请输入4位数字'},401);
     if(token)await store.delete('session:'+digest(token));
     const fresh=randomBytes(32).toString('hex');await store.put('session:'+digest(fresh),{expires:now+3600000,fingerprint});
     return response({authenticated:true},200,{'Set-Cookie':`soundisle_session=${fresh}; HttpOnly; Secure; SameSite=Strict; Path=/api; Max-Age=3600`});

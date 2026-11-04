@@ -29,7 +29,7 @@ npm run cf:deploy
 npx wrangler secret put APP_ACCESS_KEY
 ```
 
-APP_ACCESS_KEY 应为随机生成的至少32字符密钥。在 Secret 的交互提示中输入，不放在 shell 参数中，也不要发送到聊天。首次发布但 Secret 尚未配置时，所有受保护 API 拒绝访问。
+APP_ACCESS_KEY 应为随机生成的4位数字访问码，按字符串保存以保留前导0。在 Secret 的交互提示中输入，不放在 shell 参数中。首次发布但 Secret 尚未配置时，所有受保护 API 拒绝访问。迁移格式时用 `wrangler deploy --secrets-file` 将新代码与访问码一同发布，避免中途格式不兼容。
 
 可选模型：
 

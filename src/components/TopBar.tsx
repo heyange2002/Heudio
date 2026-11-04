@@ -78,7 +78,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={onOpenSettings}
             className="hover:text-stone-200 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5"
           >
-            <span>服务协议</span>
+            <span>设置</span>
           </button>
         </nav>
 
@@ -103,7 +103,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button key={section} aria-controls="music-workspace" aria-current={activeSection === section ? 'page' : undefined}
             className={`shrink-0 ${activeSection === section ? 'text-amber-300' : ''}`} onClick={() => onSelectSection(section)}>{label}</button>)}
         <button className="shrink-0" onClick={onOpenMixer}>自然音混音</button>
-        <button className="shrink-0" onClick={onOpenSettings}>服务协议</button>
+        <button className="shrink-0" onClick={onOpenSettings}>设置</button>
       </nav>
     </header>
   );

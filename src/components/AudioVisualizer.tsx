@@ -144,7 +144,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   return (
     <div
       className={`relative w-full rounded-2xl overflow-hidden border border-stone-800/80 bg-stone-900/60 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-500 ${
-        pureMusicMode ? 'min-h-[500px] lg:min-h-[580px]' : 'min-h-[380px] lg:min-h-[440px]'
+        pureMusicMode ? 'min-h-[500px] lg:min-h-[580px]' : 'h-[clamp(300px,calc(100dvh-27rem),440px)] min-h-[300px]'
       }`}
     >
       {/* Dynamic ambient color glow backdrop */}
@@ -184,13 +184,13 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       )}
 
       {/* Center Track Artwork & Title */}
-      <div className="relative z-10 flex flex-col items-center p-6 text-center max-w-md">
-        <div className="relative group mb-5">
+      <div className={`relative z-10 flex flex-col items-center ${pureMusicMode?'p-6':'p-4'} text-center max-w-md`}>
+        <div className={`relative group ${pureMusicMode?'mb-5':'mb-3'}`}>
           <TrackCover
             trackId={currentTrack.id}
               src={currentTrack.coverUrl}
             alt={currentTrack.title}
-            className="w-36 h-36 sm:w-44 sm:h-44 rounded-2xl object-cover shadow-2xl border border-stone-700/60 transition-transform duration-500 group-hover:scale-102"
+            className={`${pureMusicMode?'w-36 h-36 sm:w-44 sm:h-44':'w-[clamp(7rem,18dvh,11rem)] h-[clamp(7rem,18dvh,11rem)]'} rounded-2xl object-cover shadow-2xl border border-stone-700/60 transition-transform duration-500 group-hover:scale-102`}
           />
           {isPlaying && motionEnabled && (
             <div

@@ -19,8 +19,9 @@
     "test:speech": "node --test tests/speech.test.mjs",
     "test:speech-runtime": "node --test tests/speech-runtime.test.mjs",
     "test:companion": "node --test tests/companion.test.mjs",
-    "test:music": "node --test tests/music.test.mjs tests/qr-bootstrap.test.mjs",
-    "test:music-runtime": "node --test tests/music-runtime.test.mjs"
+    "test:music": "node --test tests/music.test.mjs tests/qr-bootstrap.test.mjs tests/playback.test.mjs",
+    "test:music-runtime": "node --test tests/music-runtime.test.mjs",
+    "test:transcribe": "node --test tests/transcribe.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

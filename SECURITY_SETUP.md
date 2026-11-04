@@ -4,9 +4,9 @@
 
 ## 配置与启动
 
-1. 将 `.env.example` 复制为 `.env`，填入 `APP_ACCESS_KEY`（至少 32 字符）。可以运行 `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` 生成随机 Key。
+1. 将 `.env.example` 复制为 `.env`，填入 `APP_ACCESS_KEY`（恰好4位数字，可含前导0）。访问码仅存后端，不能写入前端构建。
 2. 运行 `npm install`，然后 `npm run dev`。开发默认仅监听 `127.0.0.1:3000`。
-3. 打开页面输入 Key。Key 不写入前端构建、不放入 URL 或浏览器持久存储。会话存于服务内存，Cookie 为 HttpOnly、SameSite=Strict，默认一小时到期；重启需要重新登录。
+3. 打开页面输入4位访问码。访问码不放入 URL 或浏览器持久存储。会话存于服务内存，Cookie 为 HttpOnly、SameSite=Strict，默认一小时到期；重启需要重新登录。
 
 ## HTTPS
 

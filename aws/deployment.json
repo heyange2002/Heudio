@@ -1,0 +1,19 @@
+{
+  "accountId": "818381394387",
+  "region": "ap-southeast-2",
+  "url": "https://dqs1l7x3d1eg8.cloudfront.net",
+  "distributionId": "E1IDMB7RO3SS7X",
+  "instanceId": "i-07d08b1a2458168b0",
+  "instanceType": "t4g.small",
+  "launchTemplateId": "lt-0ebf1f2d9f3f69dee",
+  "securityGroupId": "sg-0229de6f5418f55d3",
+  "elasticIpAllocationId": "eipalloc-06c90ae80570271e2",
+  "originIp": "13.211.69.14",
+  "volumeId": "vol-0fc80cb6667972f3b",
+  "artifactBucket": "soundisle-deploy-818381394387-ap-southeast-2",
+  "roleName": "SoundisleEC2Role",
+  "instanceProfileName": "SoundisleEC2Profile",
+  "launchTemplateDefaultVersion": 2,
+  "verifiedAt": "2026-11-04",
+  "cloudfrontStatus": "Deployed"
+}

@@ -1,5 +1,6 @@
 import handleRequest from '@yakult-green-tea/qq-music-api/serverless';
 import { createHash } from 'node:crypto';
+import { issuePlayback, streamPlayback } from './playback.mjs';
 
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 export function validateMusicConfig(body, local = false) {
@@ -65,6 +66,7 @@ export async function createMusicClient(request, env, store, deps = {}) {
 export async function musicRoute(request, env, store, deps) {
   const url = new URL(request.url), path = url.pathname.replace('/api/music', '');
   try {
+    if (path.startsWith('/stream/')) return await streamPlayback(request, store, deps?.fetch ?? fetch);
     const client = await createMusicClient(request, env, store, deps);
     if (path === '/config') {
       if (request.method === 'PUT') {
@@ -82,6 +84,10 @@ export async function musicRoute(request, env, store, deps) {
     if (path === '/search') return json({ songs: await client.search(params.keyword || '') });
     if (path === '/user/daily-songs') return json({ songs: await client.daily() });
     if (path === '/user/liked-songs') return json({ songs: await client.liked() });
+    if (/^\/getMusicPlay\/[a-zA-Z0-9]+$/.test(path)) {
+      const data = await client.call(path, params, request.method, request.signal);
+      return json(await issuePlayback(data, request, store, deps?.fetch ?? fetch));
+    }
     return json(await client.call(path, params, request.method, request.signal));
   } catch (error) { return json({ error: error.message || '音乐请求失败' }, 502); }
 }

@@ -1,5 +1,7 @@
 import { QQMusicPanel } from './components/QQMusicPanel';
-import { CompanionProfile } from './components/CompanionProfile';
+import { MusicSidebar } from './components/MusicSidebar';
+import { LyricsModal } from './components/LyricsModal';
+import { DEFAULT_AGENT_PROMPT, normalizeAgentPrompt, musicIntentHint } from '../shared/agent-policy.mjs';
 import { qqTrack, parseLyrics, readLocal, saveLocal, type QQSong, type CompanionProfile as Profile } from './utils/music';
 import { workspaceView, type AppSection } from './utils/navigation';
 import { apiFetch } from './api';
@@ -15,7 +17,7 @@ import {
 } from './types/music';
 import { INITIAL_TRACKS, SCENE_CONFIGS } from './data/mockTracks';
 import { audioEngine } from './utils/audioEngine';
-import { calculateNextTrackIndex, analyzeUserPrompt } from './utils/sceneAnalyzer';
+import { calculateNextTrackIndex } from './utils/sceneAnalyzer';
 import { TopBar } from './components/TopBar';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { LyricsView } from './components/LyricsView';
@@ -49,6 +51,10 @@ export default function App() {
   const [ambientMix, setAmbientMix] = useState<AmbientMix>(SCENE_CONFIGS.focus.ambientDefaults);
   const [isMixerOpen, setIsMixerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMusicOpen, setIsMusicOpen] = useState(false);
+  const [isLyricsOpen, setIsLyricsOpen] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState<string>(()=>normalizeAgentPrompt(readLocal('soundisle:agent-prompt', DEFAULT_AGENT_PROMPT)));
+  useEffect(()=>{saveLocal('soundisle:agent-prompt',agentPrompt);},[agentPrompt]);
 
   // User controls & providers
   const [settings, setSettings] = useState<ServiceSettings>({
@@ -89,8 +95,6 @@ export default function App() {
       role: 'agent',
       content: '我是阿屿。想聊聊今天，还是一起找首合心意的歌？你慢慢说，我在听。',
       timestamp: '刚刚',
-      rationale: '告诉我你的音乐口味或此刻的状态，我会陪你一起选歌。',
-      quickActions: ['深夜写代码，需要深度专注', '有点累了想闭目放空', '准备入睡，请换轻柔声音', '换成纯钢琴'],
     },
   ]);
   const [isLoadingAgent, setIsLoadingAgent] = useState(false);
@@ -189,6 +193,7 @@ export default function App() {
       audioEngine.pause();
       setIsPlaying(false);
     } else {
+      if(settings.musicSource==='qq-music'&&!currentTrack.qqMid){setMusicError('请先让阿屿选歌，或在音乐侧栏选择一首 QQ 音乐。');return;}
       setMusicError(''); audioEngine.playTrack(currentTrack, currentTime);
       setIsPlaying(true);
     }
@@ -278,12 +283,15 @@ export default function App() {
     setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
     audioEngine.playTrack(next); setIsPlaying(true);
   };
-  const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene) => {
+  const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene, autoPlay = false) => {
     if (!songs.length) return;
-    audioEngine.pause(); setIsPlaying(false);
+    const queueTracks = songs.map(song => qqTrack(song, scene));
+    audioEngine.pause();
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
-    setQqQueue(songs); setQueueTitle(title); setTracks(songs.map(song => qqTrack(song, scene)));
+    setQqQueue(songs); setQueueTitle(title); setTracks(queueTracks);
     setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
+    if (autoPlay) audioEngine.playTrack(queueTracks[0]);
+    setIsPlaying(autoPlay);
   };
   useEffect(() => {
     if (!currentTrack.qqMid) return;
@@ -296,10 +304,12 @@ export default function App() {
   }, [currentTrack.id]);
 
   // Agent message handling via server API with fallback
-  const handleSendMessage = async (text: string, musicSource = settings.musicSource) => {
+  const handleSendMessage = async (text: string, musicSource = 'qq-music', intent: 'chat' | 'playlist' = 'chat') => {
     if (chatController.current) return;
+    const wantsMusic = intent==='playlist'||musicIntentHint(text)==='music';
+    if(wantsMusic&&!currentTrack.qqMid){audioEngine.pause();setIsPlaying(false);}
     const controller = new AbortController(); chatController.current = controller;
-    speechPlayer.stop(); setAgentStatus('阿屿正在听你说、为你想一想…');
+    speechPlayer.stop(); setAgentStatus(intent === 'playlist' ? '阿屿正在结合你的偏好和此刻状态编排 QQ 音乐歌单…' : '阿屿正在听你说、为你想一想…');
     const userMsg: AgentMessage = {
       id: String(Date.now()),
       role: 'user',
@@ -318,12 +328,13 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          profile, musicSource, listeningHistory,
+          profile, musicSource, listeningHistory, intent, agentPrompt: normalizeAgentPrompt(agentPrompt),
+          currentQueue: qqQueue.map(song=>({title:song.title,artist:song.artist})),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           history: messages.filter(m => m.role !== 'system' && m.id !== 'welcome').slice(-12).map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content })),
           chatModel: settings.chatModel,
           currentScene,
-          currentTrack: currentTrack.title,
+          currentTrack: currentTrack.qqMid ? currentTrack.title : '',
           weather: weatherText,
           timeOfDay: timeContextText,
           userPreferences: {
@@ -336,13 +347,13 @@ export default function App() {
       if (response.ok) {
         resultData = await response.json();
       } else {
-        // Fallback to pure logic analyzer
-        resultData = analyzeUserPrompt(text, { currentScene });
+        throw Error(wantsMusic?'这次没能完成歌单编排，请稍后重试。':'暂时无法连接阿屿，请稍后再试。');
       }
 
       if (controller.signal.aborted) return;
+      if (resultData.playlistError || (wantsMusic && !resultData.playlist?.songs?.length)) throw Error(resultData.playlistError || '这次没有找到合适的歌曲，请检查 QQ 音乐连接或稍后重试。');
       setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : '阿屿 · MiniMax M3' + (resultData.playlist ? ' · 已为你编排歌单' : ''));
-      if (resultData.playlist?.songs?.length) installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId);
+      if (resultData.playlist?.songs?.length) installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId, true);
       const agentMsg: AgentMessage = {
         id: String(Date.now() + 1),
         role: 'agent',
@@ -350,8 +361,6 @@ export default function App() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         sceneAdjustment: resultData.recommendedSceneId as SceneMode,
         recommendedTrackId: resultData.recommendedTrackId,
-        rationale: resultData.rationale,
-        quickActions: resultData.suggestedFollowUps,
       };
 
       setMessages((prev) => [...prev, agentMsg]);
@@ -359,17 +368,6 @@ export default function App() {
       // Apply recommended scene and track if changed
       if (resultData.recommendedSceneId && resultData.recommendedSceneId !== currentScene) {
         setCurrentScene(resultData.recommendedSceneId as SceneMode);
-      }
-
-      if (settings.musicSource === 'soundisle-builtin' && resultData.recommendedTrackId) {
-        const foundIdx = tracks.findIndex((t) => t.id === resultData.recommendedTrackId);
-        if (foundIdx !== -1 && foundIdx !== currentTrackIndex) {
-          setCurrentTrackIndex(foundIdx);
-          setCurrentTime(0);
-          if (isPlaying) {
-            audioEngine.playTrack(tracks[foundIdx], 0);
-          }
-        }
       }
 
       // Apply ambient adjustments
@@ -380,21 +378,10 @@ export default function App() {
       autoSpeak(resultData.reply);
     } catch (e) {
       if (controller.signal.aborted) return;
-      setAgentStatus('暂时无法连接阿屿，当前为规则回复');
-      // Fallback
-      const fallback = analyzeUserPrompt(text, { currentScene });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          role: 'agent',
-          content: fallback.reply,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          rationale: fallback.rationale,
-          quickActions: fallback.suggestedFollowUps,
-        },
-      ]);
-      autoSpeak(fallback.reply);
+      const error = e instanceof Error ? e.message : '这次没能完成请求，请稍后重试。';
+      setAgentStatus(error);
+      setMessages(prev => [...prev, { id: String(Date.now() + 1), role: 'agent', content: error, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      autoSpeak(error);
     } finally {
       if (!controller.signal.aborted) setIsLoadingAgent(false);
       if (chatController.current === controller) chatController.current = null;
@@ -421,6 +408,7 @@ export default function App() {
       <TopBar
         activeSection={activeSection}
         onSelectSection={(sec) => {
+          if (sec === 'lyrics') { setIsLyricsOpen(true); return; }
           if (!['home', 'companion', 'visualizer', 'lyrics'].includes(sec)) return;
           setActiveSection(sec as AppSection);
           setSettings(prev => ({ ...prev, pureMusicMode: false }));
@@ -435,7 +423,14 @@ export default function App() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-36 space-y-8">
+      <MusicSidebar isOpen={isMusicOpen} onToggle={()=>setIsMusicOpen(prev=>!prev)} onClose={()=>setIsMusicOpen(false)} count={qqQueue.length}>
+        <QQMusicPanel
+          onPlay={playQQSong} onQueue={installQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
+          onRecommend={() => { setIsMusicOpen(false); setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); setActiveSection('companion'); void handleSendMessage('结合我的音乐偏好、当前时间、天气和工作状态，为我编排一张适合现在听的 QQ 音乐歌单。', 'qq-music', 'playlist'); }}/>
+        {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="px-2 text-xs leading-relaxed text-stone-500">还未选择歌曲。搜索歌曲或让阿屿选歌后，即可播放 QQ 音乐。</p>}
+      </MusicSidebar>
+
+      <main className="flex-1 max-w-7xl w-full mx-auto pl-16 pr-4 sm:pr-6 2xl:pl-6 py-6 pb-36 space-y-6">
         {/* 1. Context Scene Selector Bar (4 Core Transition Modes) */}
         {!settings.pureMusicMode && (
           <div className="space-y-3">
@@ -482,10 +477,6 @@ export default function App() {
           </div>
         )}
 
-        <QQMusicPanel source={settings.musicSource} onSource={source => setSettings(prev => ({ ...prev, musicSource: source }))}
-          onPlay={playQQSong} onQueue={installQueue} queue={qqQueue} queueTitle={queueTitle}
-          onRecommend={() => { setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); setActiveSection('companion'); void handleSendMessage('结合我的音乐偏好、当前时间和状态，为我编排几首适合现在听的 QQ 音乐。', 'qq-music'); }}/>
-        {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="text-xs text-stone-500">还未选择 QQ 歌曲，播放器暂用内建声景。搜索歌曲或让阿屿为你选歌后，即可播放 QQ 音乐。</p>}
         {musicError && <p role="alert" className="text-sm text-rose-300">{musicError}</p>}
         {/* 2. Core Workspace Layout */}
         <div ref={workspaceRef} id="music-workspace" tabIndex={-1} className="scroll-mt-32 lg:scroll-mt-24 outline-none" data-view={view}>
@@ -519,16 +510,15 @@ export default function App() {
                 currentTime={currentTime}
                 onSeek={handleSeek}
                 accentColor={currentTrack.themeColors.accent}
+                onExpand={()=>setIsLyricsOpen(true)}
               />
             </div>
           </div>
         ) : (
           /* Companion Mode (Split: Left Agent Dialogue, Right Visualizer & Synced Lyrics) */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
             {/* Left Column: Agent Companion & Measured Dialogue */}
-            <div className="lg:col-span-5 space-y-4">
-              <CompanionProfile profile={profile} onChange={setProfile}/>
-              {!!listeningHistory.length && <button className="text-xs text-stone-500" onClick={() => setListeningHistory([])}>清除本机近期听歌记录</button>}
+            <div className="md:col-span-6 xl:col-span-5 space-y-4">
               {agentStatus && <p role="status" className="text-xs text-stone-400">{agentStatus}</p>}
               <AgentCompanion
                 messages={messages}
@@ -541,6 +531,7 @@ export default function App() {
                 onSpeakMessage={settings.voiceTts === 'silent' ? undefined : handleSpeak}
                 speechState={speechState}
                 onStopSpeech={() => speechPlayer.stop()}
+                onListeningChange={active => audioEngine.setInputMuted(active)}
               />
 
               {/* Natural sound ambient indicator banner */}
@@ -568,7 +559,7 @@ export default function App() {
             </div>
 
             {/* Right Column: Visualizer & Synced Lyrics */}
-            <div className="lg:col-span-7 space-y-6">
+            <div className="md:col-span-6 xl:col-span-7 space-y-4">
               <AudioVisualizer
                 currentTrack={currentTrack}
                 isPlaying={isPlaying}
@@ -584,6 +575,7 @@ export default function App() {
                 currentTime={currentTime}
                 onSeek={handleSeek}
                 accentColor={currentTrack.themeColors.accent}
+                onExpand={()=>setIsLyricsOpen(true)}
               />
             </div>
           </div>
@@ -593,6 +585,9 @@ export default function App() {
 
 
       </main>
+
+      <LyricsModal isOpen={isLyricsOpen} onClose={()=>setIsLyricsOpen(false)} title={currentTrack.title} artist={currentTrack.artist}
+        lyrics={currentTrack.lyrics} currentTime={currentTime} onSeek={handleSeek} accentColor={currentTrack.themeColors.accent}/>
 
       {/* Floating Bottom Player Controls Dock */}
       <PlayerControls
@@ -638,6 +633,9 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
+        profile={profile} onUpdateProfile={setProfile}
+        agentPrompt={agentPrompt} onUpdateAgentPrompt={setAgentPrompt}
+        listeningCount={listeningHistory.length} onClearListening={() => setListeningHistory([])}
         onUpdateSettings={(newSettings) =>
           setSettings((prev) => ({ ...prev, ...newSettings }))
         }
