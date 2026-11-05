@@ -13,6 +13,7 @@ test('MiniMax receives server credentials and validated options; frontend receiv
     assert.equal(body.model, 'speech-2.8-hd');
     assert.equal(body.voice_setting.voice_id, DEFAULT_SPEECH.voiceId);
     assert.equal(body.voice_setting.speed, 0.95);
+    assert.equal(body.voice_setting.vol, 5);
     assert.equal(body.output_format, 'hex');
     assert.equal(body.stream, false);
     return Response.json({ base_resp: { status_code: 0 }, data: { audio: '494433fffb' } });

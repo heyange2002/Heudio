@@ -28,7 +28,8 @@ export async function synthesizeSpeech(body, env, fetchImpl = fetch, signal) {
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model, text: body.text.trim(), stream: false, output_format: 'hex', language_boost: 'auto',
-        voice_setting: { voice_id: voiceId, speed, vol: 1, pitch: 0 },
+        // Playback already uses full volume; boost the synthesized voice at source.
+        voice_setting: { voice_id: voiceId, speed, vol: 5, pitch: 0 },
         audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 },
       }),
     });
