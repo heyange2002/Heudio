@@ -8,18 +8,22 @@ directories:
 files:
   - desktop/**
   - dist/**
+  - assets/icons/**
   - package.json
 mac:
+  icon: assets/icons/icon.icns
   identity: '-'
   category: public.app-category.music
   target: [dmg, zip]
   extendInfo:
     NSMicrophoneUsageDescription: 声屿需要使用麦克风，将语音转换成文字以便与阿屿交流。
 win:
+  icon: assets/icons/icon.ico
   target: [nsis]
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 linux:
+  icon: assets/icons/icon.png
   target: [AppImage]
   category: AudioVideo

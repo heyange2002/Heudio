@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="tile" x1="160" y1="96" x2="864" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#292524"/>
+      <stop offset="1" stop-color="#0C0A09"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="350" y1="280" x2="640" y2="720" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A"/>
+      <stop offset="0.5" stop-color="#FCD34D"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#tile)"/>
+  <rect x="65.5" y="65.5" width="893" height="893" rx="206.5" stroke="#FDE68A" stroke-opacity="0.12" stroke-width="3"/>
+  <!-- Three sound pillars rise above a flowing island shoreline. -->
+  <path d="M368 490V414M512 504V310M656 490V434" stroke="url(#gold)" stroke-width="72" stroke-linecap="round"/>
+  <circle cx="672" cy="302" r="30" fill="#FDE68A"/>
+  <path d="M300 608C372 550 429 550 500 600C571 650 642 650 724 584" stroke="url(#gold)" stroke-width="54" stroke-linecap="round"/>
+  <path d="M398 714C470 748 552 748 626 714" stroke="#FBBF24" stroke-width="28" stroke-linecap="round"/>
+</svg>

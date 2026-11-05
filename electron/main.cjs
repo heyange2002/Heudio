@@ -4,6 +4,7 @@ const path = require('node:path');
 const dotenv = require('dotenv');
 
 app.setName('SoundIsle');
+const appIcon = path.join(app.getAppPath(), 'assets', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 const smoke = process.argv.includes('--smoke-test');
 // Smoke checks use a disposable profile, never the user's real authorization data.
 if (smoke) app.setPath('userData', fs.mkdtempSync(path.join(app.getPath('temp'), 'soundisle-smoke-')));
@@ -40,6 +41,7 @@ function readConfig() {
 }
 
 async function start() {
+  if (process.platform === 'darwin') app.dock.setIcon(appIcon);
   const config = readConfig();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: '声屿 PC 版', submenu: [
@@ -85,6 +87,7 @@ async function createWindow() {
   window = new BrowserWindow({
     title: '声屿 SoundIsle · PC 版', width: 1440, height: 960, minWidth: 1100, minHeight: 720,
     backgroundColor: '#0c0a09', show: false,
+    icon: appIcon,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
   });
   const session = window.webContents.session;

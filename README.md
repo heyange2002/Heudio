@@ -22,6 +22,8 @@ MiniMax Key 在「设置 → 音乐与语音 → MiniMax API Key」填写，支�
 
 macOS 构建默认使用本地临时签名，尚未配置发布证书签名、公证或自动更新；正式对外发布前需补充平台签名凭据。
 
+应用标志采用与界面一致的暖黑与琥珀金，以声波、海面与日光构成「声波浮岛」。矢量源文件为 `public/brand/soundisle.svg`，修改后运行 `npm run icons:generate` 同步生成浏览器图标及 `assets/icons/` 下的 PNG、ICO、ICNS；生成文件随源码保存。桌面开发运行、各平台安装包与导航栏共用这套标志。
+
 ## 网页开发与运行
 
 需要 Node.js 22.12+。安装依赖 `npm ci`，复制 `.env.example` 为 `.env`，设置4位数字的 `APP_ACCESS_KEY`，运行 `npm run dev`。默认访问 http://127.0.0.1:3000 并使用访问码解锁，支持以0开头。
