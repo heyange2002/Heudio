@@ -11,6 +11,7 @@ import {MusicQueue} from '../src/components/MusicQueue';
 import {LyricsView} from '../src/components/LyricsView';
 import {LyricsModal} from '../src/components/LyricsModal';
 import AccessGate from '../src/AccessGate';
+import {AgentMemorySettings} from '../src/components/AgentMemorySettings';
 import type {ServiceSettings} from '../src/types/music';
 import {DEFAULT_SPEECH} from '../shared/speech.mjs';
 function dom(){
@@ -18,6 +19,22 @@ function dom(){
  Object.assign(globalThis,{window:page.window,document:page.window.document,IS_REACT_ACT_ENVIRONMENT:true});
  return {page,root:createRoot(document.getElementById('root')!)};
 }
+test('memory settings show the compressed core and distinguish a new session from forgetting everything', async () => {
+ const {page,root}=dom(),oldFetch=globalThis.fetch;const deletes:string[]=[];let resets=0;
+ Object.defineProperty(globalThis,'location',{value:page.window.location,configurable:true});
+ globalThis.fetch=async(url,options)=>{
+  if(options?.method==='DELETE')deletes.push(String(url));
+  return Response.json({longTerm:'用户长期喜欢粤语爵士。',shortTerm:[{role:'user',content:'今天不要人声'}]});
+ };
+ try {
+  await act(async()=>root.render(<AgentMemorySettings sessionId="session-a" busy={false} onNewConversation={()=>resets++}/>));
+  const summary=document.querySelector<HTMLTextAreaElement>('#agent-long-memory')!;
+  assert(summary.readOnly);assert.equal(summary.value,'用户长期喜欢粤语爵士。');
+  const click=async(text:string)=>act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent===text)!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+  await click('开始新对话');assert.equal(resets,1);assert.match(deletes[0],/scope=session/);assert.equal(summary.value,'用户长期喜欢粤语爵士。');
+  await click('清除全部记忆');assert.equal(resets,2);assert.match(deletes[1],/scope=all/);assert.equal(summary.value,'');
+ }finally{await act(()=>root.unmount());page.window.close();globalThis.fetch=oldFetch;}
+});
 test('desktop opens directly and never renders access code or lock controls', async () => {
  const {page,root}=dom(),oldFetch=globalThis.fetch;
  Object.defineProperty(globalThis,'location',{value:page.window.location,configurable:true});

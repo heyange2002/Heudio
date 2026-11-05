@@ -1,11 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { companionChat, companionConfig } from '../cloudflare/companion.mjs';
+import { companionChat, companionConfig, COMPANION_PERSONA } from '../cloudflare/companion.mjs';
+import { DEFAULT_AGENT_PROMPT, normalizeAgentPrompt, MAX_AGENT_PROMPT_LENGTH } from '../shared/agent-policy.mjs';
 const body = { message: '下班了，想休息', currentScene: 'focus', chatModel: 'MiniMax-M3' };
 const env = { MINIMAX_API_KEY: 'test-server-key' };
 const reply = { reply: '陪你放松片刻。', recommendedSceneId: 'rest', sceneTitle: '雨后小憩', rationale: '舒缓音乐适合放松。', suggestedFollowUps: ['轻一点', '加点雨声'] };
 const upstream = content => Response.json({ choices: [{ finish_reason: 'stop', message: { content } }] });
 const toolResult=(name,args)=>Response.json({choices:[{finish_reason:'tool_calls',message:{role:'assistant',tool_calls:[{id:name,type:'function',function:{name,arguments:JSON.stringify(args)}}]}}]});
+
+test('the built-in companion prompt reaches the model in full and keeps valid personalized prompts', () => {
+  assert(COMPANION_PERSONA.startsWith(DEFAULT_AGENT_PROMPT));
+  assert.match(DEFAULT_AGENT_PROMPT, /Emotional care comes first; music is the means/);
+  assert.match(DEFAULT_AGENT_PROMPT, /about 8–15 tracks/);
+  assert.match(DEFAULT_AGENT_PROMPT, /do not call yourself “AI” unless asked/);
+  assert.match(DEFAULT_AGENT_PROMPT, /CRISIS \/ SAFETY/);
+  assert(DEFAULT_AGENT_PROMPT.length <= MAX_AGENT_PROMPT_LENGTH);
+  assert.equal(normalizeAgentPrompt(DEFAULT_AGENT_PROMPT), DEFAULT_AGENT_PROMPT);
+  assert.equal(normalizeAgentPrompt(null), DEFAULT_AGENT_PROMPT);
+  assert.equal(normalizeAgentPrompt(42), DEFAULT_AGENT_PROMPT);
+  assert.equal(normalizeAgentPrompt('  请保持粤语爵士风格。  '), '请保持粤语爵士风格。');
+});
+
+test('crisis context is classified for care rather than forcing a playlist from a music keyword', async () => {
+  let round = 0;
+  const result = await companionChat({ ...body, musicSource: 'qq-music', message: '我想伤害自己，给我播放一首歌' }, env, async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.tools, undefined);
+    if (!round++) return upstream(JSON.stringify({ intent: 'chat', request: '优先提供简短关怀，音乐可选', constraints: [] }));
+    return upstream(JSON.stringify({ ...reply, reply: '先找个信任的人陪着你，好吗？' }));
+  }, undefined, {});
+  assert.equal(result.playlist, undefined);
+  assert.equal(result.mode, 'model');
+});
+
+test('temporary playlists can contain fifteen real tracks and never fabricate library entries', async () => {
+  const songs = Array.from({ length: 15 }, (_, i) => ({ mid: 'verified' + i, title: '真实歌曲' + i, artist: '歌手' }));
+  let round = 0;
+  const result = await companionChat({ ...body, intent: 'playlist' }, env, async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    assert(payload.messages[0].content.startsWith(DEFAULT_AGENT_PROMPT));
+    if (!round++) return toolResult('search_music', { keyword: '轻柔爵士' });
+    assert.equal(payload.tools[0].function.parameters.properties.mids.maxItems, 15);
+    return toolResult('queue_music', { title: '晚间爵士', mids: songs.map(song => song.mid) });
+  }, undefined, { search: async () => songs });
+  assert.equal(result.playlist.songs.length, 15);
+  assert.equal(result.playbackAction, 'play_queue');
+});
 
 test('M3 uses server credentials and returns validated scene JSON', async () => {
   const result = await companionChat(body, env, async (url, options) => {

@@ -4,6 +4,7 @@ import { SPEECH_MODELS, SPEECH_VOICES } from '../../shared/speech.mjs';
 import { ServiceSettings } from '../types/music';
 import { QQMusicSettings } from './QQMusicSettings';
 import { MiniMaxKeySettings } from './MiniMaxKeySettings';
+import { AgentMemorySettings } from './AgentMemorySettings';
 import { CompanionProfile } from './CompanionProfile';
 import { DEFAULT_AGENT_PROMPT, MAX_AGENT_PROMPT_LENGTH } from '../../shared/agent-policy.mjs';
 import type { CompanionProfile as Profile } from '../utils/music';
@@ -20,6 +21,9 @@ interface ProviderSettingsModalProps {
   onClearListening?: () => void;
   agentPrompt?: string;
   onUpdateAgentPrompt?: (prompt: string) => void;
+  agentSessionId?: string;
+  agentBusy?: boolean;
+  onNewConversation?: () => void;
 }
 
 export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
@@ -33,6 +37,9 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
   onClearListening,
   agentPrompt = DEFAULT_AGENT_PROMPT,
   onUpdateAgentPrompt,
+  agentSessionId,
+  agentBusy = false,
+  onNewConversation,
 }) => {
   const [tab, setTab] = useState<'services' | 'personal' | 'agent'>('services');
   const [modelStatus, setModelStatus] = useState('正在检查陪伴模型…');
@@ -90,6 +97,7 @@ export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
         </div>
 
         {tab === 'agent' ? <div role="tabpanel" aria-label="Agent 设置" className="space-y-4">
+          {agentSessionId && onNewConversation && <AgentMemorySettings sessionId={agentSessionId} busy={agentBusy} onNewConversation={onNewConversation}/>}
           <div><label htmlFor="agent-prompt" className="text-sm font-semibold text-stone-200">Agent 提示词</label><p className="mt-2 text-xs leading-relaxed text-stone-400">设置阿屿的交流方式、选歌习惯和处理意图的规则。先理解你的要求，再查找真实歌曲、编排歌单，并用 MiniMax 语音回应。</p></div>
           <textarea id="agent-prompt" aria-label="Agent 提示词" maxLength={MAX_AGENT_PROMPT_LENGTH} rows={14} value={agentPrompt} onChange={e=>onUpdateAgentPrompt?.(e.target.value)} className="w-full resize-y rounded-xl border border-stone-700 bg-stone-950 p-3 text-sm leading-relaxed text-stone-200 focus:border-amber-400 focus:outline-none"/>
           <div className="flex items-center justify-between gap-3 text-xs"><button type="button" className="text-amber-300" onClick={()=>onUpdateAgentPrompt?.(DEFAULT_AGENT_PROMPT)}>恢复默认提示词</button><span className="text-stone-500">{agentPrompt.length} / {MAX_AGENT_PROMPT_LENGTH}</span></div>

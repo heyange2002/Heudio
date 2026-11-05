@@ -19,11 +19,14 @@ test('QQ playback uses actual audio, supports seeking and voice ducking, and sur
     audioEngine.playTrack(song, 15); complete(Response.json({ data: { playUrl: { real123: { url: 'https://app.test/api/music/stream/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } } } }));
     await new Promise(resolve => setImmediate(resolve)); assert.equal(audios.length, 1); assert.equal(audios[0].currentTime, 15); assert.equal(started.length, 1);
     audioEngine.seek(35); assert.equal(audios[0].currentTime, 35);
-    audioEngine.setMasterVolume(0.8); audioEngine.setSpeechDucking(true); assert.equal(audios[0].volume, 0.24);
+    audioEngine.setMasterVolume(0.8); audioEngine.setSpeechDucking(true); assert.equal(audios[0].volume, 0.05);
     audioEngine.setInputMuted(true); assert.equal(audios[0].volume, 0);
-    audioEngine.setInputMuted(false); assert.equal(audios[0].volume, 0.24);
-    audioEngine.setMasterVolume(0.5); assert.equal(audios[0].volume, 0.15);
+    audioEngine.setInputMuted(false); assert.equal(audios[0].volume, 0.05);
+    audioEngine.setMasterVolume(0.5); assert.equal(audios[0].volume, 0.05);
     audioEngine.setSpeechDucking(false); assert.equal(audios[0].volume, 0.5);
+    audioEngine.setMasterVolume(0.02); audioEngine.setSpeechDucking(true); assert.equal(audios[0].volume, 0.02);
+    audioEngine.setMasterVolume(0); assert.equal(audios[0].volume, 0);
+    audioEngine.setSpeechDucking(false); assert.equal(audios[0].volume, 0);
     audioEngine.setMasterVolume(0.8);
     audioEngine.setSpeechDucking(false); assert.equal(audios[0].volume, 0.8);
     audioEngine.playTrack(song); complete(Response.json({ data: { playUrl: { real123: { url: 'https://sjy6.stream.qqmusic.qq.com/song.mp3?vkey=synthetic' } } } }));

@@ -28,6 +28,7 @@ export class SpeechPlayer {
     const audio = this.audio, generation = this.generation, text = this.state.text;
     if (!audio) return;
     try {
+      audio.volume = 1;
       await audio.play();
       if (generation === this.generation) this.update({ status: 'playing', text });
     } catch (err) {

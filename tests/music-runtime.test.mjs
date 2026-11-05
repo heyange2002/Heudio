@@ -29,5 +29,12 @@ test('real Workers runtime bundles QQ API and persists music settings with prote
     response = await mf.dispatchFetch(base + '/api/music/config', { method: 'PUT', headers, body: JSON.stringify({ mode: 'gateway', url: 'https://example.com' }) }); assert.equal(response.status, 200);
     response = await mf.dispatchFetch(base + '/api/music/config', { headers }); assert.equal((await response.json()).url, 'https://example.com');
     response = await mf.dispatchFetch(base + '/api/context/weather', { headers }); assert.equal((await response.json()).available, false);
+    response = await mf.dispatchFetch(base + '/api/agent/memory?sessionId=session-a', { headers: { 'X-Soundisle-Client': 'web' } }); assert.equal(response.status, 401);
+    response = await mf.dispatchFetch(base + '/api/agent/chat', { method: 'POST', headers, body: JSON.stringify({ sessionId: 'session-a', message: '记住这次交流', musicSource: 'qq-music', chatModel: 'local-heuristic' }) }); assert.equal(response.status, 200, await response.clone().text());
+    response = await mf.dispatchFetch(base + '/api/agent/memory?sessionId=session-a', { headers });
+    const memory = await response.json();assert.equal(response.status,200);assert.equal(memory.shortTerm.length,2);assert.equal(memory.shortTerm[0].content,'记住这次交流');assert.equal(memory.longTerm,'');
+    response = await mf.dispatchFetch(base + '/api/agent/memory?sessionId=session-b', { headers });assert.equal((await response.json()).shortTerm.length,0);
+    response = await mf.dispatchFetch(base + '/api/agent/memory?sessionId=session-a&scope=all', { method: 'DELETE', headers });assert.equal(response.status,200);assert.equal((await response.json()).shortTerm.length,0);
+    response = await mf.dispatchFetch(base + '/api/agent/memory?sessionId=session-a', { headers });assert.equal((await response.json()).shortTerm.length,0);
   } finally { await mf.dispose(); }
 });

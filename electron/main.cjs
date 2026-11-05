@@ -140,7 +140,23 @@ async function smokeTest() {
   if (!settingsChecked) throw Error('Desktop settings check failed');
   const stored = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'data', 'minimax-settings.json'), 'utf8'));
   if (stored.apiKey !== '') throw Error('Desktop key removal was not persisted');
+  await window.webContents.executeJavaScript(`(async () => {
+    const sessionId = sessionStorage.getItem('soundisle:agent-session');
+    if (!sessionId) throw Error('No conversation session');
+    const headers = { 'X-Soundisle-Client': 'web', 'Content-Type': 'application/json' };
+    const response = await fetch('/api/agent/chat', { method: 'POST', headers, body: JSON.stringify({ sessionId, message: 'desktop memory check', musicSource: 'qq-music', chatModel: 'local-heuristic' }) });
+    if (!response.ok) throw Error('Memory chat route failed');
+    const memory = await (await fetch('/api/agent/memory?sessionId=' + sessionId, { headers })).json();
+    if (memory.shortTerm.length !== 2 || memory.shortTerm[0].content !== 'desktop memory check') throw Error('Conversation did not persist');
+  })()`);
   await window.loadURL(origin);
+  await window.webContents.executeJavaScript(`(async () => {
+    for (let i = 0; i < 100; i++) {
+      if (document.querySelector('[role="log"]')?.textContent.includes('desktop memory check')) return;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    throw Error('Conversation was not restored after reload');
+  })()`);
   if (!await window.webContents.executeJavaScript(`localStorage.getItem('soundisle:desktop-smoke') === 'persisted'`)) throw Error('Desktop storage did not survive reload');
   console.log('Desktop smoke check passed:', JSON.stringify(result));
   app.quit();

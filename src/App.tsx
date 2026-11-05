@@ -4,6 +4,8 @@ import { LyricsModal } from './components/LyricsModal';
 import { DEFAULT_AGENT_PROMPT, normalizeAgentPrompt, musicIntentHint } from '../shared/agent-policy.mjs';
 import { qqTrack, parseLyrics, readLocal, saveLocal, type QQSong, type CompanionProfile as Profile } from './utils/music';
 import { apiFetch } from './api';
+import { currentAgentSession, newAgentSession } from './utils/agentSession';
+import { boundedHistory, MEMORY_LIMITS } from '../shared/agent-memory.mjs';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { DEFAULT_SPEECH } from '../shared/speech.mjs';
 import { SpeechPlayer, type SpeechState } from './utils/speechPlayer';
@@ -30,6 +32,7 @@ export default function App() {
   const [tracks, setTracks] = useState<MusicTrack[]>(restored.tracks);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(restored.currentTrackIndex);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackConfirmed, setPlaybackConfirmed] = useState(false);
   const [currentTime, setCurrentTime] = useState(restored.currentTime);
   const [currentScene, setCurrentScene] = useState<SceneMode>(restored.scene);
   const [volume, setVolume] = useState(0.85);
@@ -88,6 +91,9 @@ export default function App() {
     },
   ]);
   const [isLoadingAgent, setIsLoadingAgent] = useState(false);
+  const [agentSessionId, setAgentSessionId] = useState(currentAgentSession);
+  const conversationRevision = useRef(0);
+  const agentPlaybackPending = useRef(false);
 
   const [profile, setProfile] = useState<Profile>(() => readLocal('soundisle:profile', { name: '', city: '', preferences: '', workState: '未知' }));
   const [listeningHistory, setListeningHistory] = useState<QQSong[]>(() => readLocal('soundisle:listening', []));
@@ -96,6 +102,17 @@ export default function App() {
   const [musicError, setMusicError] = useState('');
   const [agentStatus, setAgentStatus] = useState('');
   const chatController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController(), revision = conversationRevision.current;
+    apiFetch('/api/agent/memory?sessionId=' + encodeURIComponent(agentSessionId), { signal: controller.signal }).then(async response => {
+      if (!response.ok) throw Error();
+      const data = await response.json();
+      if (!controller.signal.aborted && conversationRevision.current === revision && Array.isArray(data.shortTerm) && data.shortTerm.length) {
+        setMessages(boundedHistory(data.shortTerm).map((message, i) => ({ id: `restored-${i}`, role: message.role === 'assistant' ? 'agent' : 'user', content: message.content, timestamp: '本次对话' })));
+      }
+    }).catch(() => { if (!controller.signal.aborted) setAgentStatus('暂时无法恢复对话记忆，发送消息时将重试'); });
+    return () => controller.abort();
+  }, [agentSessionId]);
   const [weatherText, setWeatherText] = useState('未设置城市，天气未知');
   const [now, setNow] = useState(() => new Date());
   const timeContextText = now.toLocaleString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + profile.workState;
@@ -112,8 +129,14 @@ export default function App() {
     return () => { controller.abort(); clearTimeout(timer); clearInterval(interval); };
   }, [profile.city]);
   useEffect(() => {
-    audioEngine.onError(message => { setMusicError(message); setIsPlaying(false); });
+    audioEngine.onError(message => {
+      setMusicError(message); setIsPlaying(false); setPlaybackConfirmed(false);
+      if (agentPlaybackPending.current) { setAgentStatus('播放尚未成功 · ' + message); agentPlaybackPending.current = false; }
+    });
     audioEngine.onStarted(track => { if (track.qqMid) {
+      setIsPlaying(true);
+      setPlaybackConfirmed(true);
+      if (agentPlaybackPending.current) { setAgentStatus('正在播放 · ' + track.title); agentPlaybackPending.current = false; }
       const song = { mid: track.qqMid, title: track.title, artist: track.artist, album: track.album, duration: track.duration, coverUrl: track.coverUrl };
       setListeningHistory(prev => [...prev.filter(s => s.mid !== song.mid), song].slice(-15));
     } });
@@ -195,7 +218,7 @@ export default function App() {
       setIsPlaying(false);
     } else {
       if(settings.musicSource==='qq-music'&&!currentTrack.qqMid){setMusicError('请先让阿屿选歌，或在音乐侧栏选择一首 QQ 音乐。');return;}
-      setMusicError(''); audioEngine.playTrack(currentTrack, currentTime);
+      setMusicError(''); setPlaybackConfirmed(false); audioEngine.playTrack(currentTrack, currentTime);
       setIsPlaying(true);
     }
   };
@@ -205,6 +228,7 @@ export default function App() {
     setCurrentTrackIndex(nextIdx);
     setCurrentTime(0);
     if (isPlaying) {
+      setPlaybackConfirmed(false);
       audioEngine.playTrack(tracks[nextIdx], 0);
     }
   };
@@ -214,6 +238,7 @@ export default function App() {
     setCurrentTrackIndex(prevIdx);
     setCurrentTime(0);
     if (isPlaying) {
+      setPlaybackConfirmed(false);
       audioEngine.playTrack(tracks[prevIdx], 0);
     }
   };
@@ -235,7 +260,7 @@ export default function App() {
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
     setTracks(prev => [next, ...prev.filter(t => t.qqMid && t.qqMid !== song.mid)]);
     setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
-    audioEngine.playTrack(next); setIsPlaying(true);
+    setPlaybackConfirmed(false); audioEngine.playTrack(next); setIsPlaying(true);
   };
   const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene, autoPlay = false) => {
     if (!songs.length) return;
@@ -243,7 +268,7 @@ export default function App() {
     audioEngine.pause();
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
     setQqQueue(songs); setQueueTitle(title); setTracks(queueTracks);
-    setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
+    setCurrentTrackIndex(0); setCurrentTime(0); setMusicError(''); setPlaybackConfirmed(false);
     if (autoPlay) audioEngine.playTrack(queueTracks[0]);
     setIsPlaying(autoPlay);
   };
@@ -260,6 +285,7 @@ export default function App() {
   // Agent message handling via server API with fallback
   const handleSendMessage = async (text: string, musicSource = 'qq-music', intent: 'chat' | 'playlist' = 'chat') => {
     if (chatController.current) return;
+    conversationRevision.current++;
     const wantsMusic = intent==='playlist'||musicIntentHint(text)==='music';
     if(wantsMusic&&!currentTrack.qqMid){audioEngine.pause();setIsPlaying(false);}
     const controller = new AbortController(); chatController.current = controller;
@@ -271,7 +297,7 @@ export default function App() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, userMsg].slice(-MEMORY_LIMITS.messages));
     setIsLoadingAgent(true);
 
     try {
@@ -282,10 +308,11 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          sessionId: agentSessionId,
+          playback: { state: musicError ? 'error' : isPlaying ? (playbackConfirmed ? 'playing' : 'loading') : currentTrack.qqMid ? 'paused' : 'idle', error: musicError },
           profile, musicSource, listeningHistory, intent, agentPrompt: normalizeAgentPrompt(agentPrompt),
           currentQueue: qqQueue.map(song=>({title:song.title,artist:song.artist})),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          history: messages.filter(m => m.role !== 'system' && m.id !== 'welcome').slice(-12).map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content })),
           chatModel: settings.chatModel,
           currentScene,
           currentTrack: currentTrack.qqMid ? currentTrack.title : '',
@@ -307,8 +334,12 @@ export default function App() {
 
       if (controller.signal.aborted) return;
       if (resultData.playlistError || (wantsMusic && !resultData.playlist?.songs?.length)) throw Error(resultData.playlistError || '这次没有找到合适的歌曲，请检查 QQ 音乐连接或稍后重试。');
-      setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : '阿屿 · MiniMax M3' + (resultData.playlist ? ' · 已为你编排歌单' : ''));
-      if (resultData.playlist?.songs?.length) installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId, true);
+      setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : resultData.playlist ? '正在开始播放…' : '阿屿 · MiniMax M3');
+      if (resultData.memoryStatus === 'unavailable') setAgentStatus('本次记忆未能保存，音乐与对话仍可继续');
+      if (resultData.playlist?.songs?.length) {
+        agentPlaybackPending.current = true;
+        installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId, true);
+      }
       const agentMsg: AgentMessage = {
         id: String(Date.now() + 1),
         role: 'agent',
@@ -318,7 +349,7 @@ export default function App() {
         recommendedTrackId: resultData.recommendedTrackId,
       };
 
-      setMessages((prev) => [...prev, agentMsg]);
+      setMessages((prev) => [...prev, agentMsg].slice(-MEMORY_LIMITS.messages));
 
       // Apply recommended scene and track if changed
       if (resultData.recommendedSceneId && resultData.recommendedSceneId !== currentScene) {
@@ -330,7 +361,7 @@ export default function App() {
       if (controller.signal.aborted) return;
       const error = e instanceof Error ? e.message : '这次没能完成请求，请稍后重试。';
       setAgentStatus(error);
-      setMessages(prev => [...prev, { id: String(Date.now() + 1), role: 'agent', content: error, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      setMessages(prev => [...prev, { id: String(Date.now() + 1), role: 'agent', content: error, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } as AgentMessage].slice(-MEMORY_LIMITS.messages));
       autoSpeak(error);
     } finally {
       if (!controller.signal.aborted) setIsLoadingAgent(false);
@@ -478,6 +509,13 @@ export default function App() {
         settings={settings}
         profile={profile} onUpdateProfile={setProfile}
         agentPrompt={agentPrompt} onUpdateAgentPrompt={setAgentPrompt}
+        agentSessionId={agentSessionId} agentBusy={isLoadingAgent} onNewConversation={() => {
+          conversationRevision.current++;
+          speechPlayer.stop();
+          setAgentSessionId(newAgentSession());
+          setMessages([{ id: 'welcome', role: 'agent', content: '新的对话开始了。想听点什么，或者先聊聊？', timestamp: '刚刚' }]);
+          setAgentStatus('');
+        }}
         listeningCount={listeningHistory.length} onClearListening={() => setListeningHistory([])}
         onUpdateSettings={(newSettings) =>
           setSettings((prev) => ({ ...prev, ...newSettings }))

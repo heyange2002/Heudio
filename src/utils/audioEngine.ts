@@ -29,7 +29,7 @@ export class SoundIsleAudioEngine {
   public setInputMuted(active: boolean) { this.inputMuted = active; this.applyVolume(); }
   public setSpeechDucking(active: boolean) { this.ducked = active; this.applyVolume(); }
   private applyVolume() {
-    if (this.remoteAudio) this.remoteAudio.volume = this.inputMuted ? 0 : this.volume * (this.ducked ? 0.3 : 1);
+    if (this.remoteAudio) this.remoteAudio.volume = this.inputMuted ? 0 : this.ducked ? Math.min(this.volume, 0.05) : this.volume;
   }
   private initContext() {
     const Context = window.AudioContext || (window as any).webkitAudioContext;

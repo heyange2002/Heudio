@@ -12,7 +12,7 @@ function harness(request = async (_path: string, _options: RequestInit) => new R
     createUrl: () => 'blob:test-' + audios.length,
     revokeUrl: url => revoked.push(url),
     createAudio: () => {
-      const audio = { onended: null, onerror: null, paused: false, play: async () => { plays++; if (blocked) { const err = new Error('blocked'); err.name = 'NotAllowedError'; throw err; } }, pause() { this.paused = true; }, removeAttribute() {}, load() {} };
+      const audio = { volume: 0.2, onended: null, onerror: null, paused: false, play: async () => { plays++; if (blocked) { const err = new Error('blocked'); err.name = 'NotAllowedError'; throw err; } }, pause() { this.paused = true; }, removeAttribute() {}, load() {} };
       audios.push(audio); return audio as unknown as HTMLAudioElement;
     },
   });
@@ -27,12 +27,14 @@ test('speech playback stops, releases audio resources and ignores stale response
   complete!(new Response('old', { headers: { 'Content-Type': 'audio/mpeg' } })); await pending;
   assert.equal(h.audios.length, 0); assert.equal(h.player.state.status, 'idle');
   const next = harness(); await next.player.speak('新消息', settings); assert.equal(next.player.state.status, 'playing');
+  assert.equal(next.audios[0].volume, 1);
   next.audios[0].onended(); assert.equal(next.player.state.status, 'idle'); assert.equal(next.audios[0].paused, true); assert.equal(next.revoked.length, 1);
 });
 test('autoplay restrictions preserve generated audio for an explicit click without paying twice', async () => {
   const h = harness(); h.block(true); await h.player.speak('你好', settings);
   assert.equal(h.player.state.status, 'ready'); assert.equal(h.calls(), 1);
-  h.block(false); await h.player.resume(); assert.equal(h.player.state.status, 'playing'); assert.equal(h.calls(), 1); assert.equal(h.plays(), 2);
+  h.audios[0].volume = 0.1;
+  h.block(false); await h.player.resume(); assert.equal(h.player.state.status, 'playing'); assert.equal(h.calls(), 1); assert.equal(h.plays(), 2); assert.equal(h.audios[0].volume, 1);
   h.player.stop(); assert.equal(h.revoked.length, 1);
 });
 test('speech failures are visible and never invoke system speech', async () => {

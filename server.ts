@@ -5,13 +5,14 @@ import { Readable } from 'node:stream';
 import { transcribeSpeech } from './cloudflare/transcribe.mjs';
 import { MAX_VOICE_BYTES } from './shared/wav.mjs';
 import { pipeline } from 'node:stream/promises';
-import { companionChat, companionConfig } from './cloudflare/companion.mjs';
+import { companionConfig } from './cloudflare/companion.mjs';
 import { speechConfig, synthesizeSpeech } from './cloudflare/speech.mjs';
 import express from 'express';
 import https from 'node:https';
 import fs from 'node:fs';
 import { createSecurity } from './security.mjs';
 import { createLocalProviderSettings } from './local-provider-settings.mjs';
+import { createAgentMemory, memoryIdentity, memorySession } from './cloudflare/agent-memory.mjs';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -49,6 +50,7 @@ const persistMusic = () => { fs.writeFileSync(stateFile + '.tmp', JSON.stringify
 if (!musicState['qq:secret']) { musicState['qq:secret'] = randomBytes(32).toString('hex'); persistMusic(); }
 const musicEnv = { ...process.env, QQ_SESSION_SECRET: process.env.QQ_SESSION_SECRET || musicState['qq:secret'] };
 const musicStore = { keys: async (prefix: string) => Object.keys(musicState).filter(key => key.startsWith(prefix)), get: async (key: string) => musicState[key], put: async (key: string, value: unknown) => { musicState[key] = value; persistMusic(); }, delete: async (key: string) => { delete musicState[key]; persistMusic(); } };
+const agentMemory = (req: express.Request) => createAgentMemory(musicStore, memoryIdentity(req.headers.cookie, desktop));
 let musicRefreshRunning = false;
 const renewMusic = async () => {
   if (musicRefreshRunning) return;
@@ -105,19 +107,29 @@ app.post('/api/voice/synthesize', async (req, res) => {
 });
 
 app.get('/api/agent/config', (_req, res) => res.json(companionConfig(process.env)));
+app.all('/api/agent/memory', async (req, res) => {
+  try {
+    const id = memorySession(req.query.sessionId), memory = agentMemory(req);
+    if (req.method === 'GET') return res.json(await memory.inspect(id));
+    if (req.method === 'DELETE') return res.json(await memory.clear(id, req.query.scope));
+    return res.status(405).json({ error: '方法不支持' });
+  } catch { return res.status(400).json({ error: '无法读取或更新记忆，请重试' }); }
+});
 app.post('/api/agent/chat', async (req, res) => {
   if (typeof req.body?.message !== 'string' || !req.body.message.trim() || req.body.message.length > 8000) {
     return res.status(400).json({ error: '消息长度应为 1～8000 字符' });
   }
+  try { memorySession(req.body.sessionId); } catch { return res.status(400).json({ error: '对话会话标识无效' }); }
   const controller = new AbortController();
   const cancel = () => controller.abort();
   res.on('close', cancel);
   try {
     const music = req.body.musicSource === 'qq-music' ? await createMusicClient(webRequest(req), musicEnv, musicStore) : undefined;
     const weather = await getWeather(req.body.profile?.city);
-    const result = await companionChat({ ...req.body, weather: weather.summary }, process.env, fetch, controller.signal, music);
+    const result = await agentMemory(req).chat({ ...req.body, weather: weather.summary }, process.env, fetch, controller.signal, music);
     if (!res.destroyed) res.json(result);
-  } finally { res.off('close', cancel); }
+  } catch { if (!res.destroyed && !res.headersSent) res.status(503).json({ error: '对话记忆暂时不可用，请稍后再试' }); }
+  finally { res.off('close', cancel); }
 });
 
 // Start dev or production server

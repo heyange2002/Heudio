@@ -28,7 +28,8 @@
     "pc:pack": "npm run build:pc && electron-builder --dir",
     "pc:dist": "npm run build:pc && electron-builder",
     "test:desktop": "npm run build:pc && electron . --smoke-test",
-    "test:settings": "node --test tests/local-provider-settings.test.mjs"
+    "test:settings": "node --test tests/local-provider-settings.test.mjs",
+    "test:memory": "node --test tests/agent-memory.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

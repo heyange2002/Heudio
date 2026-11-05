@@ -10,6 +10,12 @@ export class MusicStore {
       return secret;
     }));
     if (action === 'get') return Response.json(await store.get(key) ?? null);
+    if (action === 'compareAndSet') return Response.json(await store.transaction(async tx => {
+      const current = await tx.get(key);
+      if (Number(current?.revision || 0) !== value.revision) return false;
+      await tx.put(key, value.value);
+      return true;
+    }));
     if (action === 'put') { await store.put(key, value); if (value?.expires) await store.setAlarm(Date.now() + 86400000); }
     if (action === 'delete') await store.delete(key);
     return Response.json({ ok: true });
@@ -28,7 +34,7 @@ export function remoteMusicStore(env) {
     if (!response.ok) throw Error('音乐配置存储暂时不可用');
     return response.json();
   };
-  return { get: key => invoke('get', key), put: (key, value) => invoke('put', key, value), delete: key => invoke('delete', key), ensureSecret: () => invoke('secret') };
+  return { get: key => invoke('get', key), put: (key, value) => invoke('put', key, value), compareAndSet: (key, revision, value) => invoke('compareAndSet', key, { revision, value }), delete: key => invoke('delete', key), ensureSecret: () => invoke('secret') };
 }
 export async function musicEnvironment(env, store) {
   return { ...env, QQ_SESSION_SECRET: env.QQ_SESSION_SECRET || await store.ensureSecret() };

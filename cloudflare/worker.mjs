@@ -5,12 +5,13 @@ import { remoteMusicStore, musicEnvironment } from './music-store.mjs';
 import { getWeather } from './context.mjs';
 export { MusicStore } from './music-store.mjs';
 import { companionChat, companionConfig } from './companion.mjs';
+import { createAgentMemory, memoryIdentity } from './agent-memory.mjs';
 import { isAccessCode } from '../shared/access-code.mjs';
 import { speechConfig, synthesizeSpeech } from './speech.mjs';
 export { AuthStore } from './auth.mjs';
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','Strict-Transport-Security':'max-age=31536000','X-Content-Type-Options':'nosniff'}});
 export default {
- async fetch(request,env){
+ async fetch(request,env,ctx){
   const url=new URL(request.url);
   if(url.protocol!=='https:'&&!['127.0.0.1','localhost','[::1]'].includes(url.hostname))return json({error:'请通过 HTTPS 访问'},426);
   if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);
@@ -18,7 +19,7 @@ export default {
   if(request.headers.get('Sec-Fetch-Site')==='cross-site'||(request.headers.get('X-Soundisle-Client')!=='web'&&!isMediaRequest(request.method,url.pathname)))return json({error:'请求来源无效'},403);
   const origin=request.headers.get('Origin');
   if(origin&&origin!==url.origin)return json({error:'请使用后端同域页面登录'},403);
-  if(!url.pathname.startsWith('/api/music/')&&url.pathname!=='/api/context/weather'&&!['/api/auth/session','/api/agent/chat','/api/agent/config','/api/voice/config','/api/voice/synthesize','/api/voice/transcribe'].includes(url.pathname))return json({error:'接口不存在'},404);
+  if(!url.pathname.startsWith('/api/music/')&&url.pathname!=='/api/context/weather'&&!['/api/auth/session','/api/agent/chat','/api/agent/config','/api/agent/memory','/api/voice/config','/api/voice/synthesize','/api/voice/transcribe'].includes(url.pathname))return json({error:'接口不存在'},404);
   try{
    if(['POST','PUT','PATCH'].includes(request.method)&&url.pathname!=='/api/voice/transcribe'){
     if(!request.headers.get('Content-Type')?.startsWith('application/json'))return json({error:'请使用 JSON 请求'},415);
@@ -32,6 +33,13 @@ export default {
    const check=await auth.fetch(new Request(new URL('/api/auth/session',url),{headers:request.headers}));
    if(!check.ok)return check;
    if(!(await check.json()).authenticated)return json({error:'请先输入4位数字访问码'},401);
+   const memory=()=>createAgentMemory(remoteMusicStore(env),memoryIdentity(request.headers.get('Cookie')),{defer:promise=>ctx?.waitUntil(promise)});
+   if(url.pathname==='/api/agent/memory') {
+    if(!env.MUSIC)return json({error:'记忆存储暂时不可用'},503);
+    if(request.method==='GET')return json(await memory().inspect(url.searchParams.get('sessionId')||undefined));
+    if(request.method==='DELETE')return json(await memory().clear(url.searchParams.get('sessionId')||undefined,url.searchParams.get('scope')));
+    return json({error:'方法不支持'},405);
+   }
    if(url.pathname==='/api/voice/transcribe')return request.method==='POST'?transcribeSpeech(request,env):json({error:'方法不支持'},405);
    if(url.pathname.startsWith('/api/music/')) {
     const store=remoteMusicStore(env);
@@ -49,7 +57,7 @@ export default {
     const store=remoteMusicStore(env);music=await createMusicClient(request,await musicEnvironment(env,store),store);
    }
    const weather=await getWeather(body.profile?.city);
-   return json(await companionChat({...body,weather:weather.summary},env,fetch,request.signal,music));
+   return json(await (env.MUSIC?memory().chat({...body,weather:weather.summary},env,fetch,request.signal,music):companionChat({...body,weather:weather.summary},env,fetch,request.signal,music)));
   }catch{return json({error:'请求格式无效或服务暂时不可用'},400);}
  }
 };
