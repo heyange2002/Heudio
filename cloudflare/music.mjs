@@ -16,6 +16,7 @@ export function validateMusicConfig(body, local = false) {
 }
 export { normalizeSongs } from '../shared/music-normalize.mjs';
 import { normalizeSongs } from '../shared/music-normalize.mjs';
+import { boundedCount, recommendByMood } from '../shared/music-discovery.mjs';
 
 const allowed = new Set(['/login/channels','/login/qr/key','/login/qr/create','/login/qr/check','/login/qr/cancel','/login/status','/login/refresh','/logout','/search','/user/daily-songs','/user/liked-songs','/user/playlist','/user/playlist-detail','/getSongListDetail','/getLyric']);
 export async function createMusicClient(request, env, store, deps = {}) {
@@ -32,10 +33,11 @@ async function storedMusicClient(sessionKey, config, env, store, deps = {}) {
   if (session?.expires < Date.now()) { await store.delete(sessionKey); session = null; }
   const invoke = deps.handleRequest ?? handleRequest;
   const fetcher = deps.fetch ?? fetch;
-  const call = async (path, params = {}, method = 'GET', signal) => {
+  const call = async (path, params = {}, method = 'GET', signal, anonymousSearch = false) => {
+    if (anonymousSearch && path !== '/search') throw Error('仅公开搜索允许匿名重试');
     if (!allowed.has(path) && !/^\/getMusicPlay\/[a-zA-Z0-9]+$/.test(path)) throw Error('音乐接口不可用');
     session = await store.get(sessionKey);
-    if (session && path !== '/login/refresh' && path !== '/logout' && !path.startsWith('/login/qr/') && (session.nextRefreshAt || 0) <= Date.now()) {
+    if (!anonymousSearch && session && path !== '/login/refresh' && path !== '/logout' && !path.startsWith('/login/qr/') && (session.nextRefreshAt || 0) <= Date.now()) {
       try { await call('/login/refresh', {}, 'POST'); } catch { /* Keep the still-valid saved grant on transient failures. */ }
       session = await store.get(sessionKey);
     }
@@ -43,7 +45,7 @@ async function storedMusicClient(sessionKey, config, env, store, deps = {}) {
     const url = new URL((config.mode === 'gateway' ? config.url : 'https://qq.internal') + path);
     for (const [key, value] of Object.entries(params)) if (value !== undefined) url.searchParams.set(key, String(value));
     const headers = new Headers();
-    if (session?.token) headers.set('X-QQ-Session', session.token);
+    if (!anonymousSearch && session?.token) headers.set('X-QQ-Session', session.token);
     const timeoutSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000);
     const upstreamRequest = new Request(url, { method, headers, signal: timeoutSignal });
     let response;
@@ -63,7 +65,7 @@ async function storedMusicClient(sessionKey, config, env, store, deps = {}) {
     if (!response.ok) throw Error(response.status === 401 ? '请先在 QQ 音乐面板扫码授权' : data.failureReason === 'connection-reset' || data.kind === 'network' ? '音乐服务连接 QQ 上游失败，请稍后重试或使用自建音乐服务' : 'QQ 音乐服务暂时不可用，请稍后重试');
     if (data.code && ![0,200,800,801,802,803].includes(data.code)) throw Error('QQ 音乐请求未成功，请检查授权状态后重试');
     const token = data.data?.token ?? data.token ?? /qqmusic_session=([^;]+)/.exec(data.cookie || response.headers.get('Set-Cookie') || '')?.[1];
-    if (token && (path !== '/login/refresh' || (await store.get(sessionKey))?.token === priorToken)) {
+    if (!anonymousSearch && token && (path !== '/login/refresh' || (await store.get(sessionKey))?.token === priorToken)) {
       session = { token, expires: Number.isFinite(data.data?.expiresAt) ? data.data.expiresAt : session?.expires || Date.now() + 30 * 86400000, nextRefreshAt: Date.now() + 30 * 60000 };
       await store.put(sessionKey, session);
     }
@@ -76,7 +78,19 @@ async function storedMusicClient(sessionKey, config, env, store, deps = {}) {
     if (path === '/logout') { await store.delete(sessionKey); session = null; }
     return scrub(data);
   };
-  return { config, call, search: async keyword => normalizeSongs(await call('/search', { keyword: String(keyword).slice(0,60), type: 'song', limit: 12 })),
+  const search = async (keyword, limit = 12, signal) => {
+    const params = { keyword: String(keyword).slice(0,60), type: 'song', limit: boundedCount(limit) };
+    const authenticated = !!(await store.get(sessionKey))?.token;
+    let songs = normalizeSongs(await call('/search', params, 'GET', signal));
+    // Some QQ grants return an empty catalog even for known artists. Public search
+    // is independent of account rights; retry it without changing the saved grant.
+    if (!songs.length && authenticated) {
+      signal?.throwIfAborted();
+      songs = normalizeSongs(await call('/search', params, 'GET', signal, true));
+    }
+    return songs.slice(0, boundedCount(limit));
+  };
+  return { config, call, search, recommend: (args, signal) => recommendByMood(search, args, signal),
     daily: async () => normalizeSongs(await call('/user/daily-songs')), liked: async () => normalizeSongs(await call('/user/liked-songs')),
     clear: async () => { await store.delete(sessionKey); session = null; },
   };

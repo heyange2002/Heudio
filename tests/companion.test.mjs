@@ -40,7 +40,7 @@ test('temporary playlists can contain fifteen real tracks and never fabricate li
     const payload = JSON.parse(options.body);
     assert(payload.messages[0].content.startsWith(DEFAULT_AGENT_PROMPT));
     if (!round++) return toolResult('search_music', { keyword: '轻柔爵士' });
-    assert.equal(payload.tools[0].function.parameters.properties.mids.maxItems, 15);
+    assert.equal(payload.tools.find(t=>t.function.name==='queue_music').function.parameters.properties.mids.maxItems, 15);
     return toolResult('queue_music', { title: '晚间爵士', mids: songs.map(song => song.mid) });
   }, undefined, { search: async () => songs });
   assert.equal(result.playlist.songs.length, 15);
@@ -133,7 +133,7 @@ test('playlist action repairs a text-only answer and returns immediately after a
   if(round++===0)return upstream(JSON.stringify(reply));
   if(round===2){assert.match(data.messages.at(-1).content,/先调用/);return Response.json({choices:[{finish_reason:'tool_calls',message:{role:'assistant',tool_calls:[{id:'find',type:'function',function:{name:'search_music',arguments:'{"keyword":"专注钢琴"}'}}]}}]});}
   assert.equal(JSON.parse(data.messages.filter(m=>m.role==='tool').at(-1).content).songs.length,6);
-  assert.deepEqual(data.tools.map(t=>t.function.name),['queue_music']);
+  assert(data.tools.some(t=>t.function.name==='queue_music'));
   return Response.json({choices:[{finish_reason:'tool_calls',message:{role:'assistant',tool_calls:[{id:'queue',type:'function',function:{name:'queue_music',arguments:JSON.stringify({title:'专注当下',mids:songs.map(s=>s.mid).reverse()})}}]}}]});
  },undefined,{search:async keyword=>{assert.equal(keyword,'专注钢琴');return songs;}});
  assert.equal(round,3);assert.equal(answer.mode,'model');assert.equal(answer.playlist.title,'专注当下');
@@ -200,7 +200,7 @@ test('oversized search batches keep useful results, run bounded parallel queries
   if(!round++)return Response.json({choices:[{finish_reason:'tool_calls',message:{role:'assistant',tool_calls:Array.from({length:6},(_,i)=>({id:'find'+i,type:'function',function:{name:'search_music',arguments:JSON.stringify({keyword:String(i)})}}))}}]});
   assert.equal(data.messages.filter(m=>m.role==='tool').length,6);
   assert.equal(data.messages.filter(m=>m.role==='tool').filter(m=>JSON.parse(m.content).error).length,2);
-  assert.deepEqual(data.tools.map(t=>t.function.name),['queue_music']);assert.equal(data.tool_choice,'auto');
+  assert.deepEqual(data.tools.map(t=>t.function.name),['create_temporary_playlist','player_control','queue_music']);assert.equal(data.tool_choice,'auto');
   return toolResult('queue_music',{title:'此刻的歌单',mids:['real0','real1','real2','real3']});
  },undefined,{search:async keyword=>{queries++;inFlight++;peak=Math.max(peak,inFlight);await new Promise(resolve=>setImmediate(resolve));inFlight--;return [{mid:'real'+keyword,title:'歌曲'+keyword,artist:'歌手'}];}});
  assert.equal(queries,4);assert.equal(peak,4);assert.equal(round,2);assert.equal(result.mode,'model');assert.equal(result.playlist.songs.length,4);
@@ -214,7 +214,7 @@ test('the final model round may still queue known songs and invalid IDs are repa
   if(round===2)return toolResult('queue_music',{title:'错误参数',mids:['invented']});
   if(round===3){const error=JSON.parse(data.messages.filter(m=>m.role==='tool').at(-1).content).error;assert.match(error,/real123/);assert(!error.includes('授权'));return upstream(JSON.stringify(reply));}
   if(round===4)return upstream(JSON.stringify(reply));
-  assert.deepEqual(data.tools.map(t=>t.function.name),['queue_music']);assert.equal(data.tool_choice,'auto');
+  assert.deepEqual(data.tools.map(t=>t.function.name),['create_temporary_playlist','player_control','queue_music']);assert.equal(data.tool_choice,'auto');
   return toolResult('queue_music',{title:'终于编好了',mids:['real123']});
  },undefined,{search:async()=>[{mid:'real123',title:'真实歌曲',artist:'歌手'}]});
  assert.equal(round,5);assert.equal(result.mode,'model');assert.equal(result.playlist.songs[0].mid,'real123');
@@ -233,8 +233,52 @@ test('generic curation can search when personal recommendations are unavailable'
  const result=await companionChat({...body,intent:'playlist'},env,async(_url,options)=>{
   const data=JSON.parse(options.body);round++;
   if(round===1)return toolResult('daily_music',{});
-  if(round===2){assert.deepEqual(data.tools.map(t=>t.function.name),['search_music','queue_music']);return toolResult('search_music',{keyword:'轻柔钢琴'});}
+  if(round===2){assert.deepEqual(data.tools.map(t=>t.function.name),['search_online_tracks','get_recommendations_by_mood','create_temporary_playlist','player_control','search_music','queue_music']);return toolResult('search_music',{keyword:'轻柔钢琴'});}
   return toolResult('queue_music',{title:'此刻轻柔',mids:['real123']});
  },undefined,{daily:async()=>{throw Error('请先扫码授权');},search:async()=>[{mid:'real123',title:'真实歌曲',artist:'歌手'}]});
  assert.equal(result.mode,'model');assert.equal(result.playlist.songs[0].mid,'real123');
+});
+
+test('canonical mood discovery creates a real playlist card without starting playback', async () => {
+  let round = 0;
+  const result = await companionChat({ ...body, intent: 'playlist' }, env, async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    assert(payload.tools.some(t => t.function.name === 'player_control'));
+    if (++round === 1) return toolResult('get_recommendations_by_mood', { mood: 'stressed', style: 'ambient', count: 5 });
+    if (round === 2) return toolResult('create_temporary_playlist', { title: '慢下来', track_ids: ['calm1'] });
+    return upstream(JSON.stringify(reply));
+  }, undefined, { search: async (query, count) => {
+    assert.match(query, /舒缓 钢琴 ambient/); assert.equal(count, 5);
+    return [{ mid: 'calm1', title: '真实舒缓歌曲', releaseDate: '2020', genre: 'ambient' }];
+  } });
+  assert.equal(result.playbackAction, 'offer_queue');
+  assert.equal(result.playlist.songs[0].releaseDate, '2020');
+  assert.equal(result.toolTrace.length, 2);
+});
+
+test('concept searches can span rounds, then player_control plays only verified IDs with bounded fade', async () => {
+  let round = 0;
+  const result = await companionChat({ ...body, intent: 'playlist' }, env, async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    if (++round === 1) return toolResult('search_online_tracks', { query: 'Cyberpunk electronic', limit: 6 });
+    if (round === 2) { assert(payload.tools.some(t=>t.function.name==='search_online_tracks')); return toolResult('search_online_tracks', { query: 'Jazz', limit: 6 }); }
+    if (round === 3) return toolResult('create_temporary_playlist', { title: '霓虹爵士', track_ids: ['cyber0','jazz0'] });
+    return toolResult('player_control', { action: 'play', fade_ms: 9000 });
+  }, undefined, { search: async query => Array.from({length:6}, (_, i) => ({mid:(query === 'Jazz' ? 'jazz' : 'cyber') + i, title:query + i})) });
+  assert.deepEqual(result.playlist.songs.map(s=>s.mid), ['cyber0','jazz0']);
+  assert.equal(result.playbackAction, 'play_queue'); assert.equal(result.fadeMs, 2000);
+});
+
+test('player controls work without searching, and invented playback IDs are rejected', async () => {
+  for (const action of ['pause','resume','next','previous']) {
+    const result = await companionChat({...body,intent:'playlist'}, env, async()=>toolResult('player_control',{action}), undefined, {});
+    assert.equal(result.playbackAction,action); assert.equal(result.playlist,undefined);
+  }
+  let round = 0;
+  const result = await companionChat({...body,intent:'playlist'}, env, async (_url, options)=>{
+    if (++round === 1) return toolResult('player_control',{action:'play',track_id:'invented',stream_url:'https://fake.test/audio'});
+    assert.match(JSON.parse(JSON.parse(options.body).messages.at(-1).content).error,/真实MID/);
+    return toolResult('player_control',{action:'pause'});
+  }, undefined, {});
+  assert.equal(result.playbackAction,'pause'); assert.equal(result.toolTrace[0].ok,false);
 });

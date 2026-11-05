@@ -37,6 +37,8 @@ export interface AgentMessage {
   recommendedTrackId?: string;
   rationale?: string;
   quickActions?: string[];
+  playlist?: { title: string; songs: import('../utils/music').QQSong[] };
+  playlistScene?: SceneMode;
 }
 
 export type PlaybackMode = 'sequential' | 'shuffle' | 'repeat-one';

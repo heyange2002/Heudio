@@ -164,6 +164,24 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     assert.match(voiceText,/这次没有找到合适的歌曲/);
     assert(!document.body.textContent?.includes('假装编好了'));
     assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'),'播放 一首歌 · 歌手');
+    // Offering and enqueuing a new playlist must preserve the current song.
+    const musicPlayCount = steps.filter(s=>s==='music:play').length;
+    await act(async()=>refreshedRecommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    await act(async()=>finishModel(Response.json({reply:'为你整理了一张歌单。',mode:'model',playbackAction:'offer_queue',playlist:{title:'舒缓备选',songs:[{mid:'offered',title:'备选歌曲',artist:'歌手',duration:180,album:'',coverUrl:''}]}})));
+    assert.equal(steps.filter(s=>s==='music:play').length,musicPlayCount);
+    const enqueue = [...document.querySelectorAll('button')].filter(b=>b.textContent==='整个歌单加入队列').at(-1)!;
+    await act(async()=>enqueue.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    assert.equal(steps.filter(s=>s==='music:play').length,musicPlayCount);
+    assert(document.querySelector('section[aria-label="播放队列"] button[aria-label="播放 备选歌曲 · 歌手"]'));
+    assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'),'播放 一首歌 · 歌手');
+    // Playback controls may return without a playlist, and card playback resolves a fresh stream.
+    await act(async()=>refreshedRecommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    await act(async()=>finishModel(Response.json({reply:'准备暂停音乐。',mode:'model',playbackAction:'pause'})));
+    assert(document.body.textContent?.includes('音乐已暂停'));
+    const playOffered = [...document.querySelectorAll('button')].filter(b=>b.textContent==='播放第一首').at(-1)!;
+    await act(async()=>playOffered.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    assert(steps.includes('music:request:offered'));
+    assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'),'播放 备选歌曲 · 歌手');
   } finally {
     await act(async () => root.unmount()); page.window.close();
     globalThis.fetch = oldFetch; globalThis.Audio = oldAudio; URL.createObjectURL = oldCreate; URL.revokeObjectURL = oldRevoke;

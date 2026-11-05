@@ -97,3 +97,53 @@ test('explicit QQ logout clears the saved grant even if the upstream is unreacha
  const client=await createMusicClient(request(),{},state,deps);await client.call('/login/qr/check');assert.equal(state.map.size,1);
  fail=true;await assert.rejects(client.call('/logout'));assert.equal(state.map.size,0);
 });
+
+test('mood recommendations share the authenticated search adapter and preserve only supplied metadata', async () => {
+  const client = await createMusicClient(request(), {}, store(), {handleRequest: async req => {
+    const url = new URL(req.url);
+    assert.equal(url.pathname, '/search'); assert.equal(url.searchParams.get('limit'), '5');
+    assert.match(url.searchParams.get('keyword'), /舒缓 治愈 ambient 夜晚/);
+    return Response.json({items:[{...song,genre:'Ambient',bpm:72,releaseDate:'2021-01-02',tags:['calm',null]}]});
+  }});
+  const songs = await client.recommend({mood:'melancholic',style:'ambient',scene:'夜晚',count:5});
+  assert.equal(songs[0].mid,song.mid); assert.equal(songs[0].bpm,72);
+  assert.equal(songs[0].releaseDate,'2021-01-02'); assert.deepEqual(songs[0].tags,['calm']);
+  const plain = normalizeSongs({items:[song]})[0];
+  for (const key of ['genre','bpm','releaseDate','tags','story']) assert.equal(plain[key],undefined);
+});
+
+test('an empty authenticated catalog retries public search without replacing the saved QQ grant', async () => {
+  const state = store(), calls = [];
+  const client = await createMusicClient(request(), {}, state, {handleRequest: async req => {
+    const path = new URL(req.url).pathname;
+    if (path === '/login/qr/check') return Response.json({code:803,token:'saved-grant'});
+    calls.push({path,token:req.headers.get('X-QQ-Session')});
+    if (path === '/user/liked-songs') return Response.json({songs:[]});
+    return Response.json({items:req.headers.has('X-QQ-Session') ? [] : [song],...(req.headers.has('X-QQ-Session') ? {} : {token:'must-not-replace-grant'})});
+  }});
+  await client.call('/login/qr/check');
+  assert.equal((await client.search('Norah Jones'))[0].mid,song.mid);
+  assert.deepEqual(calls.map(c=>c.token),['saved-grant',null]);
+  await client.liked();
+  assert.equal(calls.length,3); assert.equal(calls[2].token,'saved-grant');
+});
+
+test('anonymous empty searches do not repeat, and cancellation prevents public fallback', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  const client = await createMusicClient(request(), {}, store(), {handleRequest:async req=>{
+    if (new URL(req.url).pathname === '/login/qr/check') return Response.json({code:803,token:'saved-grant'});
+    calls++; if(calls===2)controller.abort(); return Response.json({items:[]});
+  }});
+  assert.deepEqual(await client.search('no match'),[]); assert.equal(calls,1);
+  await client.call('/login/qr/check');
+  await assert.rejects(client.search('no match',5,controller.signal),{name:'AbortError'});
+  assert.equal(calls,2);
+});
+
+test('mood retrieval retries the requested style when a compound scene query has no matches', async () => {
+  const {recommendByMood} = await import('../shared/music-discovery.mjs');
+  const queries=[];
+  const songs=await recommendByMood(async query=>{queries.push(query);return queries.length===1?[]:[song];},{mood:'烦躁',style:'爵士',scene:'雨天',count:5});
+  assert.deepEqual(queries,['舒缓 钢琴 爵士 雨天','爵士']);assert.equal(songs[0].mid,song.mid);
+});

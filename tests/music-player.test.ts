@@ -78,3 +78,29 @@ test('preloaded audio is silent, reused during handoff and discarded on changes;
     await tick(); assert.equal(audios.length, count);
   } finally { engine.pause(); engine.clearPreload(); globalThis.fetch = oldFetch; globalThis.Audio = oldAudio; }
 });
+
+test('a smooth handoff fades at the current volume and pause cancels a pending transition', async () => {
+  Object.assign(globalThis, { location: new URL('https://app.test/'), window: { dispatchEvent() {} } });
+  const oldFetch = globalThis.fetch, oldAudio = globalThis.Audio;
+  const audios: any[] = [];
+  globalThis.Audio = class {
+    volume = 1; currentTime = 0; paused = false; onended = null; onerror = null; ontimeupdate = null;
+    constructor(public src: string) { audios.push(this); }
+    play = async () => {}; pause() { this.paused = true; } removeAttribute() {} load() {}
+  } as any;
+  globalThis.fetch = async () => Response.json({data:{playUrl:{first:{url:'/api/music/stream/'+'a'.repeat(48)},second:{url:'/api/music/stream/'+'b'.repeat(48)}}}});
+  const engine = new SoundIsleAudioEngine(), started: string[] = [];
+  engine.onStarted(t => started.push(t.qqMid!));
+  const song = (mid:string) => qqTrack({mid,title:mid,artist:'歌手',album:'',coverUrl:'',duration:120},'rest');
+  const tick = () => new Promise(resolve=>setImmediate(resolve));
+  try {
+    engine.setMasterVolume(0.4); engine.playTrack(song('first')); await tick();
+    const pending = engine.transitionToTrack(song('second'), 100);
+    await new Promise(resolve=>setTimeout(resolve,45));
+    assert(audios[0].volume < 0.4); engine.pause(); await pending;
+    assert.deepEqual(started,['first']); assert.equal(engine.getIsPlaying(),false);
+    engine.playTrack(song('first')); await tick();
+    await engine.transitionToTrack(song('second'), 40); await tick();
+    assert.equal(started.at(-1),'second'); assert.equal(audios.at(-1).volume,0.4);
+  } finally {engine.pause();engine.clearPreload();globalThis.fetch=oldFetch;globalThis.Audio=oldAudio;}
+});

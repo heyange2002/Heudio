@@ -11,6 +11,10 @@ export function normalizeSongs(raw) {
     return [{ mid, id: s.id ?? s.songid, title: String(s.title ?? s.name ?? s.songname ?? '未命名歌曲').slice(0, 200),
       artist: (Array.isArray(s.singer) ? s.singer.map(a => a.name).join(' / ') : String(s.artist ?? '')).slice(0, 200),
       album: String(album.title ?? album.name ?? s.albumname ?? ''), duration: Number(s.interval ?? s.duration) || 0,
+      ...(typeof s.genre === 'string' ? { genre: s.genre.slice(0,100) } : {}),
+      ...(Number.isFinite(s.bpm) && s.bpm > 0 ? { bpm: s.bpm } : {}),
+      ...(typeof s.releaseDate === 'string' ? { releaseDate: s.releaseDate.slice(0,40) } : {}),
+      ...(Array.isArray(s.tags) ? { tags: s.tags.filter(t => typeof t === 'string').slice(0,20).map(t => t.slice(0,60)) } : {}),
       coverUrl: typeof albumMid === 'string' && /^[a-zA-Z0-9]+$/.test(albumMid) ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg` : '',
     }];
   }).slice(0, 30);

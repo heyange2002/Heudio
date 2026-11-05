@@ -7,6 +7,8 @@ export class SoundIsleAudioEngine {
   private playGeneration = 0;
   private playbackController?: AbortController;
   private preloaded?: { mid: string; controller: AbortController; ready: Promise<HTMLAudioElement | null>; audio?: HTMLAudioElement; createdAt: number };
+  private transitionGain = 1;
+  private transitionRevision = 0;
   private volume = 0.85;
   private ducked = false;
   private inputMuted = false;
@@ -29,7 +31,7 @@ export class SoundIsleAudioEngine {
   public setInputMuted(active: boolean) { this.inputMuted = active; this.applyVolume(); }
   public setSpeechDucking(active: boolean) { this.ducked = active; this.applyVolume(); }
   private applyVolume() {
-    if (this.remoteAudio) this.remoteAudio.volume = this.inputMuted ? 0 : this.ducked ? Math.min(this.volume, 0.05) : this.volume;
+    if (this.remoteAudio) this.remoteAudio.volume = this.inputMuted ? 0 : (this.ducked ? Math.min(this.volume, 0.05) : this.volume) * this.transitionGain;
   }
   private initContext() {
     const Context = window.AudioContext || (window as any).webkitAudioContext;
@@ -85,6 +87,25 @@ export class SoundIsleAudioEngine {
       return audio;
     }).catch(() => null); // A speculative failure must never interrupt the current song.
   }
+  public async transitionToTrack(track: MusicTrack, durationMs = 800) {
+    const generation = this.playGeneration;
+    const revision = ++this.transitionRevision;
+    const duration = Math.max(0, Math.min(2000, durationMs));
+    if (this.remoteAudio && this.isPlaying && duration > 0) {
+      // The UI has selected the new track; old progress/end events must not advance its queue.
+      this.remoteAudio.ontimeupdate = null; this.remoteAudio.onended = null;
+      this.preloadTrack(track);
+      const started = Date.now();
+      while (Date.now() - started < duration) {
+        if (generation !== this.playGeneration || revision !== this.transitionRevision) return;
+        this.transitionGain = Math.max(0, 1 - (Date.now() - started) / duration);
+        this.applyVolume();
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      if (generation !== this.playGeneration || revision !== this.transitionRevision) return;
+    }
+    this.playTrack(track);
+  }
   public playTrack(track: MusicTrack, start = 0) {
     const saved = this.preloaded;
     const prepared = saved && saved.mid === track.qqMid && Date.now() - saved.createdAt < 25 * 60000 ? saved : undefined;
@@ -99,9 +120,10 @@ export class SoundIsleAudioEngine {
     void this.playQQTrack(track, start, this.playGeneration, prepared);
   }
   public pause() {
+    this.transitionRevision++;
     this.playGeneration++; this.playbackController?.abort(); this.playbackController = undefined;
     if (this.remoteAudio) { this.remoteAudio.pause(); this.remoteAudio.ontimeupdate = null; this.remoteAudio.onended = null; this.remoteAudio.onerror = null; }
-    this.isPlaying = false;
+    this.isPlaying = false; this.transitionGain = 1; this.applyVolume();
   }
   public resume() { if (this.currentTrack) this.playTrack(this.currentTrack, this.elapsedSeconds); }
   public seek(seconds: number) {

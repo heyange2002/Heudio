@@ -1,10 +1,10 @@
 import type { LyricLine, MusicTrack, SceneMode } from '../types/music';
 import { EMPTY_TRACK, SCENE_THEMES } from '../data/sceneThemes';
-export type QQSong = { mid: string; title: string; artist: string; album: string; duration: number; coverUrl: string };
+export type QQSong = { mid: string; title: string; artist: string; album: string; duration: number; coverUrl: string; genre?: string; bpm?: number; releaseDate?: string; tags?: string[] };
 export type CompanionProfile = { name: string; city: string; preferences: string; workState: string };
 export function qqTrack(song: QQSong, scene: SceneMode): MusicTrack {
   const base = { ...EMPTY_TRACK, themeColors: SCENE_THEMES[scene] };
-  return { ...base, ...song, id: `qq:${song.mid}`, qqMid: song.mid, source: 'qq-music', scene, genre: 'QQ 音乐', duration: song.duration || 240, lyrics: [], description: '阿屿与你一起选的歌' };
+  return { ...base, ...song, id: `qq:${song.mid}`, qqMid: song.mid, source: 'qq-music', scene, genre: song.genre || 'QQ 音乐', duration: song.duration || 240, lyrics: [], description: '阿屿与你一起选的歌' };
 }
 export function parseLyrics(text: string): LyricLine[] {
   if (typeof text !== 'string') return [];

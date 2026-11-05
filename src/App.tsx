@@ -262,14 +262,14 @@ export default function App() {
     setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
     setPlaybackConfirmed(false); audioEngine.playTrack(next); setIsPlaying(true);
   };
-  const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene, autoPlay = false) => {
+  const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene, autoPlay = false, fadeMs = 0) => {
     if (!songs.length) return;
     const queueTracks = songs.map(song => qqTrack(song, scene));
-    audioEngine.pause();
+    if (!autoPlay || !fadeMs) audioEngine.pause();
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
     setQqQueue(songs); setQueueTitle(title); setTracks(queueTracks);
     setCurrentTrackIndex(0); setCurrentTime(0); setMusicError(''); setPlaybackConfirmed(false);
-    if (autoPlay) audioEngine.playTrack(queueTracks[0]);
+    if (autoPlay) { if (fadeMs) void audioEngine.transitionToTrack(queueTracks[0], fadeMs); else audioEngine.playTrack(queueTracks[0]); }
     setIsPlaying(autoPlay);
   };
   useEffect(() => {
@@ -333,17 +333,26 @@ export default function App() {
       }
 
       if (controller.signal.aborted) return;
-      if (resultData.playlistError || (wantsMusic && !resultData.playlist?.songs?.length)) throw Error(resultData.playlistError || '这次没有找到合适的歌曲，请检查 QQ 音乐连接或稍后重试。');
-      setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : resultData.playlist ? '正在开始播放…' : '阿屿 · MiniMax M3');
+      if (resultData.playlistError || (wantsMusic && !resultData.playlist?.songs?.length && !['pause','resume','next','previous'].includes(resultData.playbackAction))) throw Error(resultData.playlistError || '这次没有找到合适的歌曲，请检查 QQ 音乐连接或稍后重试。');
+      setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : resultData.playbackAction === 'offer_queue' ? '歌单已准备好' : resultData.playlist ? '正在开始播放…' : '阿屿 · MiniMax M3');
       if (resultData.memoryStatus === 'unavailable') setAgentStatus('本次记忆未能保存，音乐与对话仍可继续');
-      if (resultData.playlist?.songs?.length) {
+      if (resultData.playlist?.songs?.length && resultData.playbackAction !== 'offer_queue') {
         agentPlaybackPending.current = true;
-        installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId, true);
+        installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId, true, resultData.fadeMs || 0);
       }
+      if (resultData.playbackAction === 'pause') { audioEngine.pause(); setIsPlaying(false); setAgentStatus('音乐已暂停'); }
+      if (resultData.playbackAction === 'resume') {
+        if (currentTrack.qqMid) { agentPlaybackPending.current = true; audioEngine.playTrack(currentTrack, currentTime); setIsPlaying(true); setPlaybackConfirmed(false); setAgentStatus('正在继续播放…'); }
+        else setAgentStatus('当前没有可播放的歌曲，请先选歌');
+      }
+      if (resultData.playbackAction === 'next') { agentPlaybackPending.current = isPlaying; handleNext(); }
+      if (resultData.playbackAction === 'previous') { agentPlaybackPending.current = isPlaying; handlePrev(); }
       const agentMsg: AgentMessage = {
         id: String(Date.now() + 1),
         role: 'agent',
         content: resultData.reply,
+        playlist: resultData.playlist,
+        playlistScene: resultData.recommendedSceneId,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         sceneAdjustment: resultData.recommendedSceneId as SceneMode,
         recommendedTrackId: resultData.recommendedTrackId,
@@ -434,6 +443,15 @@ export default function App() {
             <div className="md:col-span-6 xl:col-span-5 space-y-4 md:flex md:flex-col md:min-h-0">
               {agentStatus && <p role="status" className="text-xs text-stone-400">{agentStatus}</p>}
               <AgentCompanion
+                onPlaylistAction={(playlist, action, scene) => {
+                  if (action === 'play') { agentPlaybackPending.current = true; installQueue(playlist.songs, playlist.title, scene, true, 800); }
+                  else {
+                    const additions = playlist.songs.map(song => qqTrack(song, scene || currentScene));
+                    setTracks(prev => [...prev.filter(t => t.qqMid), ...additions.filter(t => !prev.some(p => p.id === t.id))]);
+                    setQqQueue(prev => [...prev, ...playlist.songs.filter(s => !prev.some(p => p.mid === s.mid))]);
+                    setQueueTitle(playlist.title); setAgentStatus('已加入播放队列');
+                  }
+                }}
                 messages={messages}
                 onSendMessage={handleSendMessage}
                 isLoading={isLoadingAgent}

@@ -97,10 +97,10 @@ test('a music request returns the playable queue without waiting for long-memory
     if (payload.messages[0].content.includes('你负责压缩')) return upstream({ summary: '用户喜欢粤语爵士。' });
     round++;
     const name = round === 1 ? 'search_music' : 'queue_music';
-    return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', tool_calls: [{ id: name, type: 'function', function: { name, arguments: JSON.stringify(round === 1 ? { keyword: '粤语爵士' } : { title: '爵士时刻', mids: ['real-song'] }) } }] } }] });
-  }, undefined, { search: async () => [{ mid: 'real-song', title: '真实歌曲', artist: '歌手' }] });
+    return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', tool_calls: [{ id: name, type: 'function', function: { name, arguments: JSON.stringify(round === 1 ? { keyword: '粤语爵士' } : { title: '爵士时刻', mids: ['realSong'] }) } }] } }] });
+  }, undefined, { search: async () => [{ mid: 'realSong', title: '真实歌曲', artist: '歌手' }] });
   assert.equal(result.playbackAction, 'play_queue');
-  assert.equal(result.playlist.songs[0].mid, 'real-song');
+  assert.equal(result.playlist.songs[0].mid, 'realSong');
   assert.equal(round, 2);
   await Promise.all(jobs);
 });

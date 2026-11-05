@@ -6,6 +6,7 @@ import { VoiceInput, type VoiceInputState } from '../utils/voiceInput';
 
 interface AgentCompanionProps {
   messages: AgentMessage[];
+  onPlaylistAction?: (playlist: NonNullable<AgentMessage['playlist']>, action: 'play' | 'enqueue', scene?: SceneMode) => void;
   onSendMessage: (text: string) => void;
   isLoading: boolean;
   onApplyScene: (sceneId: SceneMode) => void;
@@ -20,6 +21,7 @@ interface AgentCompanionProps {
 
 export const AgentCompanion: React.FC<AgentCompanionProps> = ({
   messages,
+  onPlaylistAction,
   onSendMessage,
   isLoading,
   onApplyScene,
@@ -122,6 +124,16 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
                 </div>
 
                 <p className="whitespace-pre-wrap">{msg.content}</p>
+                {isAgent && msg.playlist?.songs.length ? <div className="mt-3 rounded-xl border border-stone-600/60 p-3" aria-label="推荐歌单">
+                  <p className="font-medium text-amber-200">{msg.playlist.title}</p>
+                  <ol className="mt-2 space-y-1 text-xs text-stone-300">
+                    {msg.playlist.songs.map((song, i) => <li key={song.mid}>{i + 1}. {song.title} · {song.artist}</li>)}
+                  </ol>
+                  <div className="mt-3 flex gap-3 text-xs text-amber-200">
+                    <button type="button" onClick={() => onPlaylistAction?.(msg.playlist!, 'play', msg.playlistScene)}>播放第一首</button>
+                    <button type="button" onClick={() => onPlaylistAction?.(msg.playlist!, 'enqueue', msg.playlistScene)}>整个歌单加入队列</button>
+                  </div>
+                </div> : null}
 
               </div>
               <span className="text-[10px] text-stone-500 mt-1 px-1">
@@ -177,7 +189,7 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
           <Send className="w-4 h-4" />
         </button>
       </form>
-      <p className="text-[10px] text-stone-500 mt-1.5">点击麦克风开始说话，再点结束后自动发送；录音会交给 MiniMax 识别。</p>
+      <p className="text-[10px] text-stone-500 mt-1.5">点击麦克风开始说话，再点结束后自动发送。</p>
     </div>
   );
 };
