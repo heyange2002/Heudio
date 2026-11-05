@@ -27,14 +27,12 @@
 .lyrics-line.is-active { opacity:1; background:#ffffff08; color:var(--lyric-accent); }
 .lyrics-line.is-active .lyrics-line-text { text-shadow:0 0 24px color-mix(in srgb,var(--lyric-accent) 25%,transparent); }
 .lyrics-line:hover { opacity:1; background:#ffffff08; }
-.lyrics-translation { display:block; margin-top:7px; color:#a8a29e; font-size:12px; font-weight:400; line-height:1.6; }
 .lyrics-timestamp { flex-shrink:0; font:10px ui-monospace,monospace; color:#78716c; font-variant-numeric:tabular-nums; }
 .lyrics-panel-immersive .lyrics-scroll { padding-block:24dvh; mask-image:linear-gradient(transparent,#000 14%,#000 86%,transparent); }
 .lyrics-panel-immersive .lyrics-line { padding:18px 20px; margin:10px 0; transform-origin:left center; }
 .lyrics-panel-immersive .lyrics-line-text { font-size:clamp(21px,2.8vw,40px); font-weight:650; letter-spacing:-.035em; }
 .lyrics-panel-immersive .lyrics-line:not(.is-active) { filter:blur(calc(var(--line-distance) * .55px)); }
 .lyrics-panel-immersive .lyrics-line:hover,.lyrics-panel-immersive .lyrics-line:focus-visible { filter:none; }
-.lyrics-panel-immersive .lyrics-translation { font-size:clamp(12px,1.2vw,16px); }
 .lyrics-spotlight { flex:1; min-height:160px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:22px 8px; }
 .lyrics-focus-slot { display:grid; place-items:center; flex:1; width:100%; }
 .lyrics-focus { width:100%; text-align:center; cursor:pointer; padding:14px 0; }
@@ -82,3 +80,109 @@
   .ambient-orb,.lyric-glyph,.lyrics-status-dot { animation:none !important; }
   .lyrics-line,.lyric-glyph,.lyrics-line-progress span { transition:none !important; }
 }
+
+/* Additional lyric stages, composed for SoundIsle's preview and immersive views. */
+.lyrics-style-picker { flex-wrap:wrap; min-width:0; }
+.lyrics-toolbar { align-items:flex-start; }
+.lyrics-toolbar > .flex { flex-shrink:0; padding-top:3px; }
+.lyric-scene { position:relative; isolation:isolate; min-height:190px; flex:1; min-width:0; overflow:hidden; container-type:inline-size; }
+.lyrics-panel-immersive .lyric-scene { min-height:0; }
+.lyric-scene button { cursor:pointer; text-align:left; }
+.scene-line-text { display:block; overflow-wrap:anywhere; text-wrap:balance; }
+.lyric-scene button:not(.is-active) { color:#a8a29e; }
+.lyric-scene button.is-active { color:var(--lyric-accent); }
+.scene-eyebrow { display:block; font-size:9px; letter-spacing:.25em; color:#a8a29e; opacity:.65; }
+.scene-rule { height:1px; width:60px; background:#ffffff14; flex-shrink:0; }
+.scene-rule span { display:block; width:100%; height:100%; transform-origin:left; background:var(--lyric-accent); transition:transform .25s linear; }
+/* Tilt: a grounded main sentence, its context leaning away on either side. */
+.lyric-scene-tilt { display:flex; flex-direction:column; justify-content:center; padding:24px 7%; }
+.tilt-index { position:absolute; right:0; top:8%; font-size:clamp(100px,24cqw,250px); font-weight:800; color:var(--lyric-accent); opacity:.045; line-height:1; pointer-events:none; }
+.tilt-rail { min-height:0; max-height:100%; overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; position:relative; display:flex; flex-direction:column; gap:20px; padding:20px 0 30px; }
+.tilt-row { flex-shrink:0; }
+.tilt-aside { transform:rotate(-6deg); transform-origin:left; padding-left:7%; opacity:.42; }
+.tilt-aside:last-child { transform:rotate(5deg); padding-left:13%; }
+.tilt-line { width:100%; }
+.tilt-line .scene-line-text { font-size:clamp(14px,4cqw,23px); line-height:1.6; }
+.tilt-main .scene-line-text { font-weight:700; font-size:clamp(23px,6.5cqw,52px); line-height:1.5; letter-spacing:-.035em; text-shadow:0 0 35px color-mix(in srgb,var(--lyric-accent) 20%,transparent); }
+/* Cappella-inspired alternating chat voices; only a bounded context is mounted. */
+.lyric-scene-chorus { display:flex; flex-direction:column; justify-content:center; padding:22px 3%; }
+.chorus-rail { display:flex; flex-direction:column; gap:14px; min-height:0; overflow-y:auto; padding:6px; scrollbar-width:thin; }
+.chorus-message { display:flex; align-items:flex-end; gap:8px; max-width:91%; flex-shrink:0; }
+.chorus-message.from-right { align-self:flex-end; flex-direction:row-reverse; }
+.chorus-avatar { display:grid; place-items:center; height:26px; width:26px; border:1px solid #ffffff15; border-radius:50%; color:var(--lyric-accent); background:#ffffff05; flex-shrink:0; font-size:13px; }
+.chorus-bubble { position:relative; min-width:0; border:1px solid #ffffff0d; border-radius:15px 15px 15px 3px; padding:12px 16px; background:#ffffff05; }
+.from-right .chorus-bubble { border-radius:15px 15px 3px 15px; }
+.chorus-bubble .scene-line-text { font-size:clamp(13px,3.6cqw,22px); line-height:1.5; }
+.chorus-bubble.is-active { background:color-mix(in srgb,var(--lyric-accent) 12%,#121311); border-color:color-mix(in srgb,var(--lyric-accent) 32%,transparent); box-shadow:0 8px 30px #0002; }
+.chorus-bubble.is-active .scene-line-text { font-weight:600; }
+.chorus-message:not(:has(.is-active)) { opacity:.52; }
+.chorus-message.is-upcoming { opacity:.25; }
+/* Fume-inspired poster typography with cropped, non-interactive echoes. */
+.lyric-scene-fume { display:flex; flex-direction:column; justify-content:center; padding:36px 7%; }
+.fume-echoes { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:space-evenly; z-index:-1; overflow:hidden; pointer-events:none; mask-image:linear-gradient(transparent,#000 20%,#000 80%,transparent); }
+.fume-echoes span { white-space:nowrap; font-size:clamp(62px,20cqw,175px); line-height:1.15; font-weight:900; letter-spacing:-.06em; opacity:.045; margin-left:-9%; }
+.fume-echoes span:nth-child(2) { color:var(--lyric-accent); margin-left:12%; opacity:.08; }
+.fume-foreground { display:flex; flex-direction:column; gap:24px; max-height:100%; overflow-y:auto; scrollbar-width:thin; padding:8px 0; }
+.fume-line { width:100%; }
+.fume-line .scene-line-text { font-size:clamp(27px,calc(11cqw * var(--scene-fit)),86px); font-weight:800; line-height:1.35; letter-spacing:-.04em; }
+.fume-next { opacity:.38; width:100%; }
+.fume-next .scene-line-text { font-size:clamp(12px,3cqw,18px); }
+.fume-edge { position:absolute; top:15%; bottom:15%; left:0; width:2px; background:var(--lyric-accent); transform-origin:top; opacity:.65; transition:transform .25s linear; }
+/* Pendolo-inspired clock face driven by song time, without a second timer loop. */
+.lyric-scene-clock { display:flex; align-items:center; gap:5%; padding:24px 3%; }
+.lyric-clock { position:relative; flex:0 0 34%; color:var(--lyric-accent); }
+.clock-face { width:100%; height:auto; overflow:visible; }
+.clock-hand { transform-origin:120px 120px; transition:transform .25s linear; }
+.clock-time { position:absolute; top:65%; left:0; width:100%; text-align:center; font:clamp(8px,2cqw,13px) ui-monospace,monospace; color:#a8a29e; letter-spacing:.12em; }
+.clock-rail { position:relative; display:flex; flex-direction:column; justify-content:center; gap:22px; min-width:0; flex:1; max-height:100%; overflow-y:auto; padding:12px 3px; scrollbar-width:thin; }
+.clock-line { width:100%; opacity:.35; transform-origin:left center; }
+.clock-line .scene-line-text { font-size:clamp(12px,3.2cqw,20px); line-height:1.5; }
+.clock-line.is-active { opacity:1; }
+.clock-line.is-active .scene-line-text { font-size:clamp(20px,5cqw,38px); font-weight:650; }
+.lyrics-panel-preview .lyric-scene { min-height:150px; }
+.lyrics-panel-preview .tilt-rail { gap:14px; }
+.lyrics-panel[data-motion=false] .lyric-scene *, .lyrics-panel[data-motion=false] .scene-rule span { transition:none !important; }
+@media (max-width:767px) {
+  .lyrics-style-picker button { padding:5px 8px; }
+  .lyric-scene-clock { flex-direction:column; justify-content:center; gap:12px; }
+  .lyric-clock { width:130px; flex:0 0 auto; }
+  .clock-rail { width:100%; flex:0 1 auto; text-align:center; gap:16px; }
+  .clock-rail button { text-align:center; }
+  .lyric-scene-clock .clock-rail .scene-eyebrow { display:none; }
+  .lyrics-panel-preview .lyric-scene-clock { flex-direction:row; }
+  .lyrics-panel-preview .lyric-clock { width:27%; }
+  .lyrics-panel-preview .clock-rail { text-align:left; }
+  .lyrics-panel-preview .clock-rail button { text-align:left; }
+  .lyric-scene-tilt { padding-inline:6%; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .lyric-scene *, .scene-rule span { transition:none !important; }
+}
+
+/* Window chrome joins the application header while native controls stay usable. */
+[data-desktop-platform] .window-drag-region { -webkit-app-region:drag; app-region:drag; user-select:none; }
+[data-desktop-platform] .window-drag-region :is(button,a,input,select,textarea,[role=button]) { -webkit-app-region:no-drag; app-region:no-drag; }
+[data-desktop-platform] .app-titlebar { background:#0c0a09; }
+[data-desktop-platform] .app-titlebar-inner { max-width:none; height:64px; padding-block:0; }
+[data-desktop-platform=darwin] .app-titlebar-inner { padding-left:104px; }
+[data-desktop-platform=darwin] .lyrics-stage-header { padding-left:84px; min-height:40px; }
+:is([data-desktop-platform=win32],[data-desktop-platform=linux]) .app-titlebar-inner { padding-right:calc(160px + 24px); }
+:is([data-desktop-platform=win32],[data-desktop-platform=linux]) .lyrics-stage-header { padding-right:160px; min-height:40px; }
+/* Fit the music stage between the header and the measured playback dock. */
+.pure-music-visualizer { min-height:360px; }
+.pure-music-artwork,.pure-music-lyrics { min-width:0; min-height:0; display:flex; flex-direction:column; }
+.pure-music-lyrics .lyrics-panel { flex:1; }
+@media (min-width:1024px) {
+  .pure-music-main { height:calc(100dvh - 64px); min-height:0; flex:none; display:flex; flex-direction:column; padding-bottom:calc(var(--player-dock-height,120px) + 24px); }
+  .pure-music-workspace { min-height:0; flex:1; }
+  .pure-music-layout { height:100%; min-height:0; }
+  .pure-music-visualizer { height:100%; min-height:0; }
+  .pure-music-lyrics .lyrics-panel { height:100%; min-height:0; }
+}
+/* Consistent light feedback for controls, including the unstyled text buttons. */
+:where(button:enabled, a[href]) { cursor:pointer; }
+:where(button:disabled) { cursor:not-allowed; }
+@media (hover:hover) {
+  :where(button:enabled:hover, a[href]:hover) { background-image:linear-gradient(#ffffff0d,#ffffff0d); }
+}
+:where(button:focus-visible,a[href]:focus-visible) { outline:2px solid #fbbf24; outline-offset:3px; }

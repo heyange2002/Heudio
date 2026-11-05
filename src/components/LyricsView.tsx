@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { LyricLine } from '../types/music';
 import { findActiveLyricIndex, formatTime } from '../utils/sceneAnalyzer';
-import { Languages, Maximize2 } from 'lucide-react';
+import { Maximize2 } from 'lucide-react';
 import { useMotionPreference } from '../hooks/useMotionPreference';
 
-export type LyricStyle = 'flow' | 'luminous' | 'floating';
-export const LYRIC_STYLES = [['flow', '云阶'], ['luminous', '流光'], ['floating', '浮游']] as const;
+import { LyricScenes } from './lyrics/LyricScenes';
+import { LYRIC_STYLES, LYRIC_STYLE_DESCRIPTIONS, isSceneStyle, type LyricStyle } from './lyrics/styles';
+export { LYRIC_STYLES, type LyricStyle } from './lyrics/styles';
 interface LyricsViewProps {
   lyrics: LyricLine[]; currentTime: number; onSeek: (seconds: number) => void; accentColor: string;
   immersive?: boolean; onExpand?: () => void; lyricStyle?: LyricStyle; onStyleChange?: (style: LyricStyle) => void;
@@ -18,7 +19,6 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ lyrics, currentTime, onS
   const [localStyle, setLocalStyle] = useState<LyricStyle>('flow');
   const style = lyricStyle || localStyle;
   const animate = useMotionPreference(motionEnabled);
-  const [showTranslation, setShowTranslation] = useState(immersive);
   const containerRef = useRef<HTMLDivElement>(null), activeLineRef = useRef<HTMLButtonElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   const browsingUntil = useRef(0);
@@ -44,9 +44,8 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ lyrics, currentTime, onS
   const changeStyle = (value: LyricStyle) => { setLocalStyle(value); onStyleChange?.(value); };
   return <section ref={sectionRef} aria-label={immersive ? '完整歌词' : '歌词预览'} data-lyric-style={style} data-motion={animate} className={`lyrics-panel ${immersive ? 'lyrics-panel-immersive' : 'lyrics-panel-preview'}`} style={{ '--lyric-accent': accentColor } as CSSProperties}>
     <div className="lyrics-toolbar">
-      <div aria-label="歌词样式" className="lyrics-style-picker">{LYRIC_STYLES.map(([value, label]) => <button type="button" key={value} aria-pressed={style === value} onClick={() => changeStyle(value)}>{label}</button>)}</div>
+      <div aria-label="歌词样式" className="lyrics-style-picker">{LYRIC_STYLES.map(([value, label]) => <button type="button" key={value} aria-pressed={style === value} title={LYRIC_STYLE_DESCRIPTIONS[value]} onClick={() => changeStyle(value)}>{label}</button>)}</div>
       <div className="flex items-center gap-1">
-        <button type="button" onClick={() => setShowTranslation(!showTranslation)} aria-label="切换双语释义" aria-pressed={showTranslation} className="lyrics-tool"><Languages className="h-3.5 w-3.5"/><span className="hidden sm:inline">{showTranslation ? '双语' : '原文'}</span></button>
         {!immersive && onExpand && <button type="button" aria-label="放大歌词" onClick={onExpand} className="lyrics-tool"><Maximize2 className="h-3.5 w-3.5"/><span>放大</span></button>}
       </div>
     </div>
@@ -57,11 +56,11 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ lyrics, currentTime, onS
           return <motion.button type="button" key={`${idx}:${line.text}`} layout={animate ? 'position' : false} transition={{ type: 'spring', stiffness: 170, damping: 26 }}
             aria-current={isActive ? 'true' : undefined} aria-label={`跳转到 ${formatTime(line.timeSec)} ${line.text}`} ref={isActive ? activeLineRef : null} onClick={() => { browsingUntil.current = 0; onSeek(line.timeSec); }}
             className={`lyrics-line ${isActive ? 'is-active' : ''}`} style={{ '--line-distance': Math.min(4, Math.abs(idx - activeIndex)) } as CSSProperties}>
-            <span className="min-w-0 flex-1"><span className="lyrics-line-text">{line.text}</span>{showTranslation && line.translation && <span className="lyrics-translation">{line.translation}</span>}</span>
+            <span className="min-w-0 flex-1"><span className="lyrics-line-text">{line.text}</span></span>
             <span className="lyrics-timestamp">{formatTime(line.timeSec)}</span>
           </motion.button>;
         })}
-      </div> : <div className="lyrics-spotlight">
+      </div> : isSceneStyle(style) ? <LyricScenes style={style} lyrics={lyrics} activeIndex={activeIndex} progress={progress} currentTime={currentTime} onSeek={onSeek} animate={animate}/> : <div className="lyrics-spotlight">
         <button type="button" className="lyrics-neighbor" disabled={activeIndex <= 0} onClick={() => onSeek(lyrics[activeIndex - 1].timeSec)}>{lyrics[activeIndex - 1]?.text || '此刻，听见'}</button>
         <div className="lyrics-focus-slot"><AnimatePresence mode="wait" initial={false}>
           <motion.button key={`${activeIndex}:${active?.text}:${style}`} type="button" aria-current="true" aria-label={`跳转到 ${formatTime(active?.timeSec ?? 0)} ${active?.text}`} onClick={() => active && onSeek(active.timeSec)} className={`lyrics-focus lyrics-focus-${style}`}
@@ -70,7 +69,6 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ lyrics, currentTime, onS
               const lit = Math.max(0, Math.min(1, progress * chars.length - i));
               return <span key={i} className="lyric-glyph" style={{ '--glyph-lit': lit, '--glyph-delay': `${i * 22}ms`, '--glyph-tilt': `${((i * 7) % 9) - 4}deg`, '--glyph-y': `${Math.sin(i * 1.7) * 7}px` } as CSSProperties}>{char === ' ' ? '\u00a0' : char}</span>;
             })}</span>
-            {showTranslation && active?.translation && <span className="lyrics-translation">{active.translation}</span>}
           </motion.button>
         </AnimatePresence></div>
         <button type="button" className="lyrics-neighbor" disabled={activeIndex >= lyrics.length - 1} onClick={() => onSeek(lyrics[activeIndex + 1].timeSec)}>{lyrics[activeIndex + 1]?.text || '余音，仍在'}</button>

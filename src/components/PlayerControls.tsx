@@ -1,5 +1,5 @@
 import { TrackCover } from './TrackCover';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { PLAYBACK_MODES, nextPlaybackMode } from '../utils/playbackOrder';
 import { MusicTrack, PlaybackMode } from '../types/music';
 import { formatTime } from '../utils/sceneAnalyzer';
@@ -50,6 +50,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   sleepTimerMinutes,
   onSetSleepTimer,
 }) => {
+  const footerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const footer = footerRef.current;
+    if (!footer) return;
+    const measure = () => document.documentElement.style.setProperty('--player-dock-height', footer.getBoundingClientRect().height + 'px');
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure); observer.observe(footer);
+    return () => { observer.disconnect(); document.documentElement.style.removeProperty('--player-dock-height'); };
+  }, []);
   const modeLabel = PLAYBACK_MODES.find(mode => mode.id === playbackMode)!.label;
   const nextLabel = PLAYBACK_MODES.find(mode => mode.id === nextPlaybackMode(playbackMode))!.label;
   const [showTimerMenu, setShowTimerMenu] = useState(false);
@@ -69,7 +79,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     : 0;
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-40 bg-stone-950/95 backdrop-blur-2xl border-t border-stone-800/80 px-4 py-3 sm:px-6 transition-all">
+    <footer ref={footerRef} aria-label="播放控制栏" className="fixed bottom-0 left-0 right-0 z-40 bg-stone-950/95 backdrop-blur-2xl border-t border-stone-800/80 px-4 py-3 sm:px-6 transition-all">
       <div className="max-w-7xl mx-auto flex flex-col gap-2">
         {/* Scrub bar */}
         <div className="flex items-center gap-3 w-full">

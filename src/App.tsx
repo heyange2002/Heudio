@@ -19,10 +19,11 @@ import { EMPTY_TRACK } from './data/sceneThemes';
 import { DEFAULT_EQ, normalizeEqualizer, type EqualizerSettings } from './utils/equalizer';
 import { audioEngine } from './utils/audioEngine';
 import { PlaybackOrder, normalizePlaybackMode, nextPlaybackMode } from './utils/playbackOrder';
-import { PLAYBACK_SESSION_KEY, restorePlaybackSession, trackSong } from './utils/playbackSession';
+import { PLAYBACK_SESSION_KEY, DEFAULT_QUEUE_TITLE, restorePlaybackSession, trackSong } from './utils/playbackSession';
 import { TopBar } from './components/TopBar';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { LyricsView, type LyricStyle } from './components/LyricsView';
+import { normalizeLyricStyle } from './components/lyrics/styles';
 import { AgentCompanion } from './components/AgentCompanion';
 import { PlayerControls } from './components/PlayerControls';
 import { EqualizerDrawer } from './components/EqualizerDrawer';
@@ -45,7 +46,7 @@ export default function App() {
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const [lyricStyle, setLyricStyle] = useState<LyricStyle>(() => {
     const saved = readLocal<string>('soundisle:lyric-style', 'flow');
-    return saved === 'luminous' || saved === 'floating' ? saved : 'flow';
+    return normalizeLyricStyle(saved);
   });
   useEffect(() => { saveLocal('soundisle:lyric-style', lyricStyle); }, [lyricStyle]);
   const [agentPrompt, setAgentPrompt] = useState<string>(()=>normalizeAgentPrompt(readLocal('soundisle:agent-prompt', DEFAULT_AGENT_PROMPT)));
@@ -66,6 +67,9 @@ export default function App() {
     sleepTimerMinutes: null,
   });
 
+  const failedTracks = useRef(new Set<string>());
+  const playbackCursor = useRef({ tracks, index: currentTrackIndex, mode: settings.playbackMode });
+  playbackCursor.current = { tracks, index: currentTrackIndex, mode: settings.playbackMode };
   const playbackOrder = useRef(new PlaybackOrder());
   useEffect(() => { saveLocal('soundisle:playback-mode', settings.playbackMode); }, [settings.playbackMode]);
 
@@ -134,11 +138,30 @@ export default function App() {
     return () => { controller.abort(); clearTimeout(timer); clearInterval(interval); };
   }, [profile.city]);
   useEffect(() => {
-    audioEngine.onError(message => {
+    audioEngine.onError((message, failure) => {
+      if (failure?.kind === 'unavailable') {
+        const cursor = playbackCursor.current;
+        if (cursor.tracks[cursor.index]?.id !== failure.trackId) return;
+        failedTracks.current.add(failure.trackId);
+        setMusicError(''); setPlaybackConfirmed(false); setCurrentTime(0);
+        // Skip unavailable songs even in repeat-one, without retrying failed
+        // candidates until a song starts or the user requests playback again.
+        const candidates = cursor.tracks.filter(track => track.qqMid && (track.id === failure.trackId || !failedTracks.current.has(track.id)));
+        if (candidates.length > 1) {
+          const next = playbackOrder.current.select(candidates.map(track => track.id), candidates.findIndex(track => track.id === failure.trackId), cursor.mode, 'next');
+          const candidate = candidates[next], index = cursor.tracks.findIndex(track => track.id === candidate.id);
+          playbackCursor.current = { ...cursor, index };
+          setCurrentTrackIndex(index); setIsPlaying(true);
+          audioEngine.playTrack(candidate, 0); return;
+        }
+        audioEngine.pause(); audioEngine.clearPreload(); setIsPlaying(false);
+        agentPlaybackPending.current = false; setAgentStatus(''); return;
+      }
       setMusicError(message); setIsPlaying(false); setPlaybackConfirmed(false);
       if (agentPlaybackPending.current) { setAgentStatus('播放尚未成功 · ' + message); agentPlaybackPending.current = false; }
     });
     audioEngine.onStarted(track => { if (track.qqMid) {
+      failedTracks.current.clear();
       setIsPlaying(true);
       setPlaybackConfirmed(true);
       if (agentPlaybackPending.current) { setAgentStatus('正在播放 · ' + track.title); agentPlaybackPending.current = false; }
@@ -223,30 +246,26 @@ export default function App() {
       setIsPlaying(false);
     } else {
       if(settings.musicSource==='qq-music'&&!currentTrack.qqMid){setMusicError('请先让阿屿选歌，或在音乐侧栏选择一首 QQ 音乐。');return;}
+      failedTracks.current.clear();
       setMusicError(''); setPlaybackConfirmed(false); audioEngine.playTrack(currentTrack, currentTime);
       setIsPlaying(true);
     }
   };
 
-  const handleNext = (fromAuto: boolean = false) => {
-    const nextIdx = playbackOrder.current.select(tracks.map(track => track.id), currentTrackIndex, settings.playbackMode, fromAuto ? 'ended' : 'next');
-    setCurrentTrackIndex(nextIdx);
-    setCurrentTime(0);
-    if (isPlaying) {
-      setPlaybackConfirmed(false);
-      audioEngine.playTrack(tracks[nextIdx], 0);
-    }
+  const moveTrack = (action: 'next' | 'previous' | 'ended') => {
+    const cursor = playbackCursor.current;
+    if (!cursor.tracks.some(track => track.qqMid)) return;
+    const index = playbackOrder.current.select(cursor.tracks.map(track => track.id), cursor.index, cursor.mode, action);
+    const selected = cursor.tracks[index];
+    if (!selected?.qqMid) return;
+    failedTracks.current.clear();
+    playbackCursor.current = { ...cursor, index };
+    setCurrentTrackIndex(index); setCurrentTime(0); setMusicError('');
+    setPlaybackConfirmed(false); setIsPlaying(true);
+    audioEngine.playTrack(selected, 0);
   };
-
-  const handlePrev = () => {
-    const prevIdx = playbackOrder.current.select(tracks.map(track => track.id), currentTrackIndex, settings.playbackMode, 'previous');
-    setCurrentTrackIndex(prevIdx);
-    setCurrentTime(0);
-    if (isPlaying) {
-      setPlaybackConfirmed(false);
-      audioEngine.playTrack(tracks[prevIdx], 0);
-    }
-  };
+  const handleNext = (fromAuto = false) => moveTrack(fromAuto ? 'ended' : 'next');
+  const handlePrev = () => moveTrack('previous');
 
   const handleSeek = (sec: number) => {
     setCurrentTime(sec);
@@ -260,6 +279,14 @@ export default function App() {
 
   const handleSelectScene = (scene: SceneMode) => setCurrentScene(scene);
 
+  const clearQueue = () => {
+    failedTracks.current.clear();
+    playbackCursor.current = { tracks: [EMPTY_TRACK], index: 0, mode: settings.playbackMode };
+    audioEngine.pause(); audioEngine.clearPreload(); agentPlaybackPending.current = false;
+    setIsPlaying(false); setPlaybackConfirmed(false); setCurrentTime(0); setCurrentTrackIndex(0);
+    setTracks([EMPTY_TRACK]); setQqQueue([]); setQueueTitle(DEFAULT_QUEUE_TITLE); setMusicError('');
+    setAgentStatus('播放列表已清空');
+  };
   const appendQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene) => {
     const existing = tracks.filter(track => track.qqMid);
     const merged = mergeSongs(existing.map(trackSong), songs);
@@ -277,12 +304,16 @@ export default function App() {
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
     setTracks(nextTracks); setQqQueue(nextTracks.map(trackSong));
     setCurrentTrackIndex(nextTracks.findIndex(track => track.qqMid === song.mid)); setCurrentTime(0); setMusicError('');
+    failedTracks.current.clear();
+    playbackCursor.current = { tracks: nextTracks, index: nextTracks.findIndex(track => track.qqMid === song.mid), mode: settings.playbackMode };
     setPlaybackConfirmed(false); audioEngine.playTrack(selected); setIsPlaying(true);
   };
   const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene, autoPlay = false, fadeMs = 0) => {
     if (!songs.length) return;
     songs = mergeSongs([], songs);
     const queueTracks = songs.map(song => qqTrack(song, scene));
+    failedTracks.current.clear();
+    playbackCursor.current = { tracks: queueTracks, index: 0, mode: settings.playbackMode };
     if (!autoPlay || !fadeMs) audioEngine.pause();
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
     setQqQueue(songs); setQueueTitle(title); setTracks(queueTracks);
@@ -363,8 +394,8 @@ export default function App() {
         if (currentTrack.qqMid) { agentPlaybackPending.current = true; audioEngine.playTrack(currentTrack, currentTime); setIsPlaying(true); setPlaybackConfirmed(false); setAgentStatus('正在继续播放…'); }
         else setAgentStatus('当前没有可播放的歌曲，请先选歌');
       }
-      if (resultData.playbackAction === 'next') { agentPlaybackPending.current = isPlaying; handleNext(); }
-      if (resultData.playbackAction === 'previous') { agentPlaybackPending.current = isPlaying; handlePrev(); }
+      if (resultData.playbackAction === 'next') { agentPlaybackPending.current = tracks.some(track => track.qqMid); handleNext(); }
+      if (resultData.playbackAction === 'previous') { agentPlaybackPending.current = tracks.some(track => track.qqMid); handlePrev(); }
       const agentMsg: AgentMessage = {
         id: String(Date.now() + 1),
         role: 'agent',
@@ -407,7 +438,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans transition-colors duration-700 selection:bg-amber-400/30 selection:text-amber-200"
+      className="app-shell min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans transition-colors duration-700 selection:bg-amber-400/30 selection:text-amber-200"
       style={{
         background: `radial-gradient(ellipse at 50% 0%, ${currentTrack.themeColors.bgTint} 0%, #0c0a09 100%)`,
       }}
@@ -421,19 +452,19 @@ export default function App() {
       {/* Main Container */}
       <MusicSidebar isOpen={isMusicOpen} onToggle={()=>setIsMusicOpen(prev=>!prev)} onClose={()=>setIsMusicOpen(false)} count={qqQueue.length}>
         <QQMusicPanel
-          onPlay={playQQSong} onQueue={(songs, title) => installQueue(songs, title, currentScene, true)} onAppend={appendQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
+          onPlay={playQQSong} onQueue={(songs, title) => installQueue(songs, title, currentScene, true)} onAppend={appendQueue} onClear={clearQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
           onRecommend={() => { setIsMusicOpen(false); setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); void handleSendMessage('结合我的音乐偏好、当前时间、天气和工作状态，为我编排一张适合现在听的 QQ 音乐歌单。', 'qq-music', 'playlist'); }}/>
         {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="px-2 text-xs leading-relaxed text-stone-500">还未选择歌曲。搜索歌曲或让阿屿选歌后，即可播放 QQ 音乐。</p>}
       </MusicSidebar>
 
-      <main className={`flex-1 max-w-7xl w-full mx-auto pl-16 pr-4 sm:pr-6 2xl:pl-6 py-6 pb-36 space-y-6 ${settings.pureMusicMode ? '' : 'md:h-[calc(100dvh-4rem)] md:min-h-[640px] md:flex md:flex-col md:flex-none md:pb-32'}`}>
+      <main className={`flex-1 max-w-7xl w-full mx-auto pl-16 pr-4 sm:pr-6 2xl:pl-6 py-6 pb-36 space-y-6 ${settings.pureMusicMode ? 'pure-music-main' : 'md:h-[calc(100dvh-4rem)] md:min-h-[640px] md:flex md:flex-col md:flex-none md:pb-32'}`}>
         {musicError && <p role="alert" className="text-sm text-rose-300">{musicError}</p>}
         {/* 2. Core Workspace Layout */}
-        <div id="music-workspace" tabIndex={-1} className={`scroll-mt-32 lg:scroll-mt-24 outline-none ${settings.pureMusicMode ? '' : 'md:flex-1 md:min-h-0'}`} data-view={view}>
+        <div id="music-workspace" tabIndex={-1} className={`scroll-mt-32 lg:scroll-mt-24 outline-none ${settings.pureMusicMode ? 'pure-music-workspace' : 'md:flex-1 md:min-h-0'}`} data-view={view}>
         {view === 'music' ? (
           /* Pure Music / Zen Mode (Expanded Visualizer + Lyrics Center Stage) */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-            <div className="lg:col-span-7">
+          <div className="pure-music-layout grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            <div className="pure-music-artwork lg:col-span-7">
               <AudioVisualizer
                 currentTrack={currentTrack}
                 isPlaying={isPlaying && playbackConfirmed}
@@ -444,7 +475,7 @@ export default function App() {
                 pureMusicMode={true}
               />
             </div>
-            <div className="lg:col-span-5">
+            <div className="pure-music-lyrics lg:col-span-5">
               <LyricsView
                 lyrics={currentTrack.lyrics}
                 currentTime={currentTime}

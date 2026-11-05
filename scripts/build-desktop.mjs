@@ -7,3 +7,5 @@ await build({
   bundle: true, platform: 'node', format: 'esm', target: 'node22', packages: 'external',
 });
 await copyFile('electron/main.cjs', 'desktop/main.cjs');
+
+await copyFile('electron/preload.cjs', 'desktop/preload.cjs');

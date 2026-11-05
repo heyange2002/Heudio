@@ -88,7 +88,9 @@ async function createWindow() {
     title: '声屿 SoundIsle · PC 版', width: 1440, height: 960, minWidth: 1100, minHeight: 720,
     backgroundColor: '#0c0a09', show: false,
     icon: appIcon,
-    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 18, y: 23 } } : { titleBarOverlay: { color: '#0c0a09', symbolColor: '#d6d3d1', height: 64 } }),
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
   });
   const session = window.webContents.session;
   session.setPermissionRequestHandler((contents, permission, callback, details) => {
@@ -117,6 +119,25 @@ async function smokeTest() {
       status: response.status, session, unlocked: unlocked.status, node: typeof window.require };
   })()`);
   if (result.status !== 200 || result.session.authenticated !== true || result.session.desktop !== true || result.unlocked !== 200 || !result.rendered || result.node !== 'undefined') throw Error(`Desktop smoke check failed: ${JSON.stringify(result)}`);
+  const layout = await window.webContents.executeJavaScript(`(async () => {
+    const waitFor = async check => { for(let i=0;i<100;i++){if(check())return;await new Promise(r=>setTimeout(r,30));}throw Error('Layout UI timed out'); };
+    await waitFor(()=>document.querySelector('.app-titlebar'));
+    const header=document.querySelector('.app-titlebar'),control=header.querySelector('button');
+    if (!window.soundisleWindow?.platform || document.documentElement.dataset.desktopPlatform!==window.soundisleWindow.platform) throw Error('Desktop layout bridge missing');
+    if (getComputedStyle(header).getPropertyValue('app-region')!=='drag' || getComputedStyle(control).getPropertyValue('app-region')!=='no-drag') throw Error('Titlebar drag regions invalid');
+    document.querySelector('button[aria-label="开启只听音乐模式"]').click();
+    await waitFor(()=>document.querySelector('.pure-music-main'));
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const art=document.querySelector('.pure-music-visualizer').getBoundingClientRect();
+    const lyrics=document.querySelector('.pure-music-lyrics .lyrics-panel').getBoundingClientRect();
+    const footer=document.querySelector('footer[aria-label="播放控制栏"]').getBoundingClientRect();
+    const gap=footer.top-art.bottom;
+    if(Math.abs(art.bottom-lyrics.bottom)>2 || gap<12 || gap>28 || art.height<300) throw Error('Pure music layout leaves blank space: '+JSON.stringify({art:art.toJSON(),lyrics:lyrics.toJSON(),gap}));
+    return {platform:window.soundisleWindow.platform,headerTop:header.getBoundingClientRect().top,gap,height:art.height};
+  })()`);
+  if (process.env.SOUNDISLE_SMOKE_CAPTURE) fs.writeFileSync(process.env.SOUNDISLE_SMOKE_CAPTURE, (await window.webContents.capturePage()).toPNG());
+  await window.webContents.executeJavaScript(`document.querySelector('button[aria-label="退出纯音乐模式"]').click()`);
+  console.log('Desktop titlebar and layout check passed:', JSON.stringify(layout));
   const settingsChecked = await window.webContents.executeJavaScript(`(async () => {
     const waitFor = async check => { for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw Error('Settings UI timed out'); };
     if (document.body.textContent.includes('锁定访问') || document.querySelector('input[aria-label="4位数字访问码"]')) throw Error('Desktop still shows access code controls');

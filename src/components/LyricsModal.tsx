@@ -29,7 +29,7 @@ export function LyricsModal({isOpen,onClose,title,artist,coverUrl,trackId,isPlay
   return <div className="lyrics-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="lyrics-modal-title" className="lyrics-stage">
       <AmbientBackdrop accentColor={lyricsProps.accentColor} coverUrl={coverUrl} isPlaying={isPlaying} motionEnabled={motionEnabled}/>
-      <header className="lyrics-stage-header">
+      <header className="lyrics-stage-header window-drag-region">
         <span className="text-xs tracking-[.3em] text-stone-400">SOUNDISLE <span className="hidden sm:inline"> / 此刻沉浸</span></span>
         <button ref={closeRef} type="button" aria-label="关闭完整歌词" onClick={onClose} className="lyrics-close"><X className="h-5 w-5"/></button>
       </header>

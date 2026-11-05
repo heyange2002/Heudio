@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api';
 import { mergeSongs, type QQSong } from '../utils/music';
 import { TrackCover } from './TrackCover';
-export function QQMusicPanel({ onPlay, onQueue, onAppend, queue, queueTitle, onRecommend, currentMid, isPlaying }: {
-  onAppend: (songs: QQSong[], title: string) => void; onPlay: (song: QQSong) => void; onQueue: (songs: QQSong[], title: string) => void;
+export function QQMusicPanel({ onPlay, onQueue, onAppend, onClear, queue, queueTitle, onRecommend, currentMid, isPlaying }: {
+  onClear?: () => void; onAppend: (songs: QQSong[], title: string) => void; onPlay: (song: QQSong) => void; onQueue: (songs: QQSong[], title: string) => void;
   queue: QQSong[]; queueTitle: string; onRecommend: () => void; currentMid?: string; isPlaying?: boolean;
 }) {
   const [status, setStatus] = useState('正在检查 QQ 音乐…'), [loggedIn, setLoggedIn] = useState(false);
@@ -92,6 +92,6 @@ export function QQMusicPanel({ onPlay, onQueue, onAppend, queue, queueTitle, onR
     })}</ul>}
     {!!songs.length && <div><div className="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 className="text-xs text-stone-400">{songsTitle} · {songs.length} 首</h3><div className="flex gap-3"><button type="button" className="text-xs text-amber-300" onClick={() => onQueue(songs, songsTitle)}>播放歌单</button><button type="button" className="text-xs text-amber-300" onClick={() => { onAppend(songs, songsTitle); setStatus(`已将「${songsTitle}」追加到当前歌单，重复歌曲自动跳过`); }}>追加到当前歌单</button></div></div>
       <div className="max-h-64 overflow-y-auto grid sm:grid-cols-2 gap-2">{songs.map(song => <button key={song.mid} type="button" aria-label={`播放 ${song.title} · ${song.artist}`} className="min-w-0 flex gap-3 items-center text-left p-2 rounded-xl hover:bg-stone-800" onClick={() => onPlay(song)}><TrackCover trackId={'qq:'+song.mid} src={song.coverUrl} alt={song.title} className="w-10 h-10 shrink-0 rounded-lg object-cover"/><span className="min-w-0 flex-1"><span className="block text-sm truncate">{song.title}</span><span className="block text-xs text-stone-400 truncate">{song.artist}</span></span><Play aria-hidden="true" className="ml-auto w-4 h-4 shrink-0 text-amber-300"/></button>)}</div></div>}
-    <MusicQueue songs={queue} title={queueTitle} currentMid={currentMid} isPlaying={isPlaying} onPlay={onPlay}/>
+    <MusicQueue songs={queue} title={queueTitle} currentMid={currentMid} isPlaying={isPlaying} onPlay={onPlay} onClear={onClear}/>
   </section>;
 }

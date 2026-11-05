@@ -22,10 +22,10 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
   const audios: any[] = [];
   let voiceText = '';
   globalThis.Audio = class {
-    volume = 1; currentTime = 0; onended = null; onerror = null; ontimeupdate = null;
+    volume = 1; currentTime = 0; paused = false; onended = null; onerror = null; ontimeupdate = null;
     constructor(public src: string) { audios.push(this); }
-    play = async () => { steps.push(this.src.startsWith('blob:') ? 'speech:play' : 'music:play'); };
-    pause() {} removeAttribute() {} load() {}
+    play = async () => { this.paused = false; steps.push(this.src.startsWith('blob:') ? 'speech:play' : 'music:play'); };
+    pause() { this.paused = true; } removeAttribute() {} load() {}
   } as any;
   URL.createObjectURL = () => 'blob:reply'; URL.revokeObjectURL = () => {};
   globalThis.fetch = async (url, options) => {
@@ -190,6 +190,18 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     await act(async()=>playOffered.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     assert(steps.includes('music:request:offered'));
     assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'),'播放 备选歌曲 · 歌手');
+    // Clearing stops audio, removes the full queue and persists an empty session.
+    const activeBeforeClear=latestMusic();
+    await act(async()=>document.querySelector('button[aria-label="清空播放列表"]')!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+    assert.equal(activeBeforeClear.paused,true);
+    assert.equal(document.querySelector('section[aria-label="播放队列"]'),null);
+    const cleared=JSON.parse(localStorage.getItem('soundisle:playback-session')!);
+    assert.deepEqual(cleared.songs,[]);assert.deepEqual(cleared.queue,[]);assert.equal(cleared.position,0);
+    assert(document.querySelector('button[aria-label="播放"]'));
+    await act(async()=>root.unmount());root=createRoot(document.getElementById('root')!);
+    await act(async()=>root.render(<App/>));
+    assert.equal(document.querySelector('section[aria-label="播放队列"]'),null);
+    assert.equal(JSON.parse(localStorage.getItem('soundisle:playback-session')!).queue.length,0);
   } finally {
     await act(async () => root.unmount()); page.window.close();
     globalThis.fetch = oldFetch; globalThis.Audio = oldAudio; URL.createObjectURL = oldCreate; URL.revokeObjectURL = oldRevoke;

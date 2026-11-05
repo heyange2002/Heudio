@@ -164,7 +164,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   return (
     <section aria-label="专辑动效"
       className={`relative w-full rounded-2xl overflow-hidden border border-stone-800/80 bg-stone-900/60 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-500 ${
-        pureMusicMode ? 'min-h-[500px] lg:min-h-[580px]' : 'h-[clamp(300px,calc(100dvh-27rem),440px)] min-h-[300px] md:shrink-0'
+        pureMusicMode ? 'pure-music-visualizer' : 'h-[clamp(300px,calc(100dvh-27rem),440px)] min-h-[300px] md:shrink-0'
       }`}
     >
       {motionStyle === 'nebula' && <AmbientBackdrop accentColor={currentTrack.themeColors.accent} glow={currentTrack.themeColors.glow} coverUrl={currentTrack.coverUrl} isPlaying={isPlaying} motionEnabled={canAnimate}/>}
