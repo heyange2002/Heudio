@@ -33,17 +33,17 @@ test('crisis context is classified for care rather than forcing a playlist from 
   assert.equal(result.mode, 'model');
 });
 
-test('temporary playlists can contain fifteen real tracks and never fabricate library entries', async () => {
-  const songs = Array.from({ length: 15 }, (_, i) => ({ mid: 'verified' + i, title: '真实歌曲' + i, artist: '歌手' }));
+test('temporary playlists can exceed fifteen real tracks and never fabricate library entries', async () => {
+  const songs = Array.from({ length: 40 }, (_, i) => ({ mid: 'verified' + i, title: '真实歌曲' + i, artist: '歌手' }));
   let round = 0;
   const result = await companionChat({ ...body, intent: 'playlist' }, env, async (_url, options) => {
     const payload = JSON.parse(options.body);
     assert(payload.messages[0].content.startsWith(DEFAULT_AGENT_PROMPT));
     if (!round++) return toolResult('search_music', { keyword: '轻柔爵士' });
-    assert.equal(payload.tools.find(t=>t.function.name==='queue_music').function.parameters.properties.mids.maxItems, 15);
+    assert.equal(payload.tools.find(t=>t.function.name==='queue_music').function.parameters.properties.mids.maxItems, undefined);
     return toolResult('queue_music', { title: '晚间爵士', mids: songs.map(song => song.mid) });
   }, undefined, { search: async () => songs });
-  assert.equal(result.playlist.songs.length, 15);
+  assert.equal(result.playlist.songs.length, 40);
   assert.equal(result.playbackAction, 'play_queue');
 });
 

@@ -2,7 +2,7 @@ export function normalizeSongs(raw) {
   const list = raw?.cdlist?.[0]?.songlist ?? raw?.response?.cdlist?.[0]?.songlist ?? raw?.items ?? raw?.data?.songs ?? raw?.data?.songlist ?? raw?.data?.list ?? raw?.songs ?? raw?.songlist ?? [];
   if (!Array.isArray(list)) return [];
   const seen = new Set();
-  return list.map(item => item.songInfo ?? item.song ?? item).flatMap(s => {
+  return list.filter(item => item && typeof item === 'object').map(item => item.songInfo ?? item.song ?? item).flatMap(s => {
     const mid = s.mid ?? s.songmid;
     if (typeof mid !== 'string' || !/^[a-zA-Z0-9]+$/.test(mid) || seen.has(mid)) return [];
     seen.add(mid);
@@ -17,5 +17,5 @@ export function normalizeSongs(raw) {
       ...(Array.isArray(s.tags) ? { tags: s.tags.filter(t => typeof t === 'string').slice(0,20).map(t => t.slice(0,60)) } : {}),
       coverUrl: typeof albumMid === 'string' && /^[a-zA-Z0-9]+$/.test(albumMid) ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg` : '',
     }];
-  }).slice(0, 30);
+  });
 }

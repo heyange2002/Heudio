@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { Pause, Play, X } from 'lucide-react';
 import type { LyricLine } from '../types/music';
-import { LyricsView } from './LyricsView';
+import { LyricsView, type LyricStyle } from './LyricsView';
+import { AmbientBackdrop } from './AmbientBackdrop';
+import { TrackCover } from './TrackCover';
+import { formatTime } from '../utils/sceneAnalyzer';
 
-export function LyricsModal({isOpen,onClose,title,artist,...lyricsProps}:{isOpen:boolean;onClose:()=>void;title:string;artist:string;lyrics:LyricLine[];currentTime:number;onSeek:(seconds:number)=>void;accentColor:string}) {
+export function LyricsModal({isOpen,onClose,title,artist,coverUrl,trackId,isPlaying=false,motionEnabled=true,onTogglePlay,duration=0,...lyricsProps}:{isOpen:boolean;onClose:()=>void;title:string;artist:string;lyrics:LyricLine[];currentTime:number;onSeek:(seconds:number)=>void;accentColor:string;coverUrl?:string;trackId?:string;isPlaying?:boolean;motionEnabled?:boolean;onTogglePlay?:()=>void;duration?:number;lyricStyle?:LyricStyle;onStyleChange?:(style:LyricStyle)=>void}) {
   const dialogRef=useRef<HTMLDivElement>(null),closeRef=useRef<HTMLButtonElement>(null);
   const latestClose=useRef(onClose);latestClose.current=onClose;
   useEffect(()=>{
@@ -13,7 +16,7 @@ export function LyricsModal({isOpen,onClose,title,artist,...lyricsProps}:{isOpen
     const keydown=(event:KeyboardEvent)=>{
       if(event.key==='Escape'){event.preventDefault();latestClose.current();}
       if(event.key!=='Tab')return;
-      const controls=dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),[href],input,select,textarea,[tabindex="0"]');
+      const controls=dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]');
       if(!controls?.length)return;
       const first=controls[0],last=controls[controls.length-1];
       if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
@@ -23,13 +26,26 @@ export function LyricsModal({isOpen,onClose,title,artist,...lyricsProps}:{isOpen
     return()=>{document.body.style.overflow=overflow;window.removeEventListener('keydown',keydown);if(previous?.isConnected)previous.focus();};
   },[isOpen]);
   if(!isOpen)return null;
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="lyrics-modal-title" className="w-full max-w-3xl max-h-[90dvh] overflow-y-auto rounded-3xl border border-stone-700/70 bg-stone-950 p-4 sm:p-6 shadow-2xl">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div className="min-w-0"><h2 id="lyrics-modal-title" className="truncate text-lg font-semibold">{title}</h2><p className="mt-1 truncate text-sm text-stone-400">{artist} · 完整歌词</p></div>
-        <button ref={closeRef} type="button" aria-label="关闭完整歌词" onClick={onClose} className="rounded-lg p-2 text-stone-400 hover:bg-stone-800 hover:text-stone-100"><X className="h-5 w-5"/></button>
+  return <div className="lyrics-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="lyrics-modal-title" className="lyrics-stage">
+      <AmbientBackdrop accentColor={lyricsProps.accentColor} coverUrl={coverUrl} isPlaying={isPlaying} motionEnabled={motionEnabled}/>
+      <header className="lyrics-stage-header">
+        <span className="text-xs tracking-[.3em] text-stone-400">SOUNDISLE <span className="hidden sm:inline"> / 此刻沉浸</span></span>
+        <button ref={closeRef} type="button" aria-label="关闭完整歌词" onClick={onClose} className="lyrics-close"><X className="h-5 w-5"/></button>
+      </header>
+      <div className="lyrics-stage-content">
+        <div className="lyrics-stage-album">
+          {coverUrl && <TrackCover trackId={trackId || title} src={coverUrl} alt={title} className="lyrics-stage-cover"/>}
+          <div className="min-w-0"><p className="mb-3 text-[10px] tracking-[.3em] text-stone-400 hidden md:block">NOW PLAYING</p><h2 id="lyrics-modal-title" className="text-xl md:text-3xl font-semibold text-stone-100 text-balance">{title}</h2><p className="mt-2 text-sm text-stone-400">{artist} · 完整歌词</p></div>
+        </div>
+        <LyricsView {...lyricsProps} immersive isPlaying={isPlaying} motionEnabled={motionEnabled} duration={duration}/>
       </div>
-      <LyricsView {...lyricsProps} immersive/>
+      <footer className="lyrics-stage-player">
+        {onTogglePlay && <button type="button" aria-label={isPlaying ? '暂停播放' : '继续播放'} onClick={onTogglePlay} className="lyrics-play">{isPlaying ? <Pause className="h-5 w-5"/> : <Play className="h-5 w-5"/>}</button>}
+        <span className="lyrics-player-time">{formatTime(lyricsProps.currentTime)}</span>
+        <input aria-label="沉浸歌词播放进度" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(lyricsProps.currentTime,duration || 1)} disabled={!duration} onChange={e=>lyricsProps.onSeek(Number(e.target.value))} style={{accentColor:lyricsProps.accentColor}} className="min-w-0 flex-1"/>
+        <span className="lyrics-player-time">{formatTime(duration)}</span>
+      </footer>
     </div>
   </div>;
 }

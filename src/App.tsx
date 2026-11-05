@@ -2,7 +2,7 @@ import { QQMusicPanel } from './components/QQMusicPanel';
 import { MusicSidebar } from './components/MusicSidebar';
 import { LyricsModal } from './components/LyricsModal';
 import { DEFAULT_AGENT_PROMPT, normalizeAgentPrompt, musicIntentHint } from '../shared/agent-policy.mjs';
-import { qqTrack, parseLyrics, readLocal, saveLocal, type QQSong, type CompanionProfile as Profile } from './utils/music';
+import { qqTrack, mergeSongs, parseLyrics, readLocal, saveLocal, type QQSong, type CompanionProfile as Profile } from './utils/music';
 import { apiFetch } from './api';
 import { currentAgentSession, newAgentSession } from './utils/agentSession';
 import { boundedHistory, MEMORY_LIMITS } from '../shared/agent-memory.mjs';
@@ -22,7 +22,7 @@ import { PlaybackOrder, normalizePlaybackMode, nextPlaybackMode } from './utils/
 import { PLAYBACK_SESSION_KEY, restorePlaybackSession, trackSong } from './utils/playbackSession';
 import { TopBar } from './components/TopBar';
 import { AudioVisualizer } from './components/AudioVisualizer';
-import { LyricsView } from './components/LyricsView';
+import { LyricsView, type LyricStyle } from './components/LyricsView';
 import { AgentCompanion } from './components/AgentCompanion';
 import { PlayerControls } from './components/PlayerControls';
 import { EqualizerDrawer } from './components/EqualizerDrawer';
@@ -43,6 +43,11 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMusicOpen, setIsMusicOpen] = useState(false);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
+  const [lyricStyle, setLyricStyle] = useState<LyricStyle>(() => {
+    const saved = readLocal<string>('soundisle:lyric-style', 'flow');
+    return saved === 'luminous' || saved === 'floating' ? saved : 'flow';
+  });
+  useEffect(() => { saveLocal('soundisle:lyric-style', lyricStyle); }, [lyricStyle]);
   const [agentPrompt, setAgentPrompt] = useState<string>(()=>normalizeAgentPrompt(readLocal('soundisle:agent-prompt', DEFAULT_AGENT_PROMPT)));
   useEffect(()=>{saveLocal('soundisle:agent-prompt',agentPrompt);},[agentPrompt]);
 
@@ -255,15 +260,28 @@ export default function App() {
 
   const handleSelectScene = (scene: SceneMode) => setCurrentScene(scene);
 
+  const appendQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene) => {
+    const existing = tracks.filter(track => track.qqMid);
+    const merged = mergeSongs(existing.map(trackSong), songs);
+    const byMid = new Map(existing.map(track => [track.qqMid, track]));
+    setTracks(merged.map(song => byMid.get(song.mid) || qqTrack(song, scene)));
+    setQqQueue(merged);
+    if (!existing.length) { setQueueTitle(title); setCurrentTrackIndex(0); }
+    const added = merged.length - existing.length;
+    setAgentStatus(added ? `已追加 ${added} 首到当前歌单，共 ${merged.length} 首` : '这些歌曲已在当前歌单中');
+  };
   const playQQSong = (song: QQSong) => {
-    const next = qqTrack(song, currentScene);
+    const existing = tracks.filter(track => track.qqMid);
+    const selected = existing.find(track => track.qqMid === song.mid) || qqTrack(song, currentScene);
+    const nextTracks = existing.some(track => track.qqMid === song.mid) ? existing : [...existing, selected];
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
-    setTracks(prev => [next, ...prev.filter(t => t.qqMid && t.qqMid !== song.mid)]);
-    setCurrentTrackIndex(0); setCurrentTime(0); setMusicError('');
-    setPlaybackConfirmed(false); audioEngine.playTrack(next); setIsPlaying(true);
+    setTracks(nextTracks); setQqQueue(nextTracks.map(trackSong));
+    setCurrentTrackIndex(nextTracks.findIndex(track => track.qqMid === song.mid)); setCurrentTime(0); setMusicError('');
+    setPlaybackConfirmed(false); audioEngine.playTrack(selected); setIsPlaying(true);
   };
   const installQueue = (songs: QQSong[], title: string, scene: SceneMode = currentScene, autoPlay = false, fadeMs = 0) => {
     if (!songs.length) return;
+    songs = mergeSongs([], songs);
     const queueTracks = songs.map(song => qqTrack(song, scene));
     if (!autoPlay || !fadeMs) audioEngine.pause();
     setSettings(prev => ({ ...prev, musicSource: 'qq-music' }));
@@ -403,7 +421,7 @@ export default function App() {
       {/* Main Container */}
       <MusicSidebar isOpen={isMusicOpen} onToggle={()=>setIsMusicOpen(prev=>!prev)} onClose={()=>setIsMusicOpen(false)} count={qqQueue.length}>
         <QQMusicPanel
-          onPlay={playQQSong} onQueue={installQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
+          onPlay={playQQSong} onQueue={(songs, title) => installQueue(songs, title, currentScene, true)} onAppend={appendQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
           onRecommend={() => { setIsMusicOpen(false); setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); void handleSendMessage('结合我的音乐偏好、当前时间、天气和工作状态，为我编排一张适合现在听的 QQ 音乐歌单。', 'qq-music', 'playlist'); }}/>
         {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="px-2 text-xs leading-relaxed text-stone-500">还未选择歌曲。搜索歌曲或让阿屿选歌后，即可播放 QQ 音乐。</p>}
       </MusicSidebar>
@@ -418,8 +436,8 @@ export default function App() {
             <div className="lg:col-span-7">
               <AudioVisualizer
                 currentTrack={currentTrack}
-                isPlaying={isPlaying}
-                motionEnabled={settings.motionEnabled}
+                isPlaying={isPlaying && playbackConfirmed}
+                motionEnabled={settings.motionEnabled && !isLyricsOpen}
                 onToggleMotion={() =>
                   setSettings((prev) => ({ ...prev, motionEnabled: !prev.motionEnabled }))
                 }
@@ -433,6 +451,7 @@ export default function App() {
                 onSeek={handleSeek}
                 accentColor={currentTrack.themeColors.accent}
                 onExpand={()=>setIsLyricsOpen(true)}
+                lyricStyle={lyricStyle} onStyleChange={setLyricStyle} motionEnabled={settings.motionEnabled} isPlaying={isPlaying && playbackConfirmed} duration={currentTrack.duration}
               />
             </div>
           </div>
@@ -445,12 +464,7 @@ export default function App() {
               <AgentCompanion
                 onPlaylistAction={(playlist, action, scene) => {
                   if (action === 'play') { agentPlaybackPending.current = true; installQueue(playlist.songs, playlist.title, scene, true, 800); }
-                  else {
-                    const additions = playlist.songs.map(song => qqTrack(song, scene || currentScene));
-                    setTracks(prev => [...prev.filter(t => t.qqMid), ...additions.filter(t => !prev.some(p => p.id === t.id))]);
-                    setQqQueue(prev => [...prev, ...playlist.songs.filter(s => !prev.some(p => p.mid === s.mid))]);
-                    setQueueTitle(playlist.title); setAgentStatus('已加入播放队列');
-                  }
+                  else appendQueue(playlist.songs, playlist.title, scene);
                 }}
                 messages={messages}
                 onSendMessage={handleSendMessage}
@@ -471,8 +485,8 @@ export default function App() {
             <div className="md:col-span-6 xl:col-span-7 space-y-4 md:flex md:flex-col md:min-h-0">
               <AudioVisualizer
                 currentTrack={currentTrack}
-                isPlaying={isPlaying}
-                motionEnabled={settings.motionEnabled}
+                isPlaying={isPlaying && playbackConfirmed}
+                motionEnabled={settings.motionEnabled && !isLyricsOpen}
                 onToggleMotion={() =>
                   setSettings((prev) => ({ ...prev, motionEnabled: !prev.motionEnabled }))
                 }
@@ -485,6 +499,7 @@ export default function App() {
                 onSeek={handleSeek}
                 accentColor={currentTrack.themeColors.accent}
                 onExpand={()=>setIsLyricsOpen(true)}
+                lyricStyle={lyricStyle} onStyleChange={setLyricStyle} motionEnabled={settings.motionEnabled} isPlaying={isPlaying && playbackConfirmed} duration={currentTrack.duration}
               />
             </div>
           </div>
@@ -496,7 +511,9 @@ export default function App() {
       </main>
 
       <LyricsModal isOpen={isLyricsOpen} onClose={()=>setIsLyricsOpen(false)} title={currentTrack.title} artist={currentTrack.artist}
-        lyrics={currentTrack.lyrics} currentTime={currentTime} onSeek={handleSeek} accentColor={currentTrack.themeColors.accent}/>
+        lyrics={currentTrack.lyrics} currentTime={currentTime} onSeek={handleSeek} accentColor={currentTrack.themeColors.accent}
+        coverUrl={currentTrack.coverUrl} trackId={currentTrack.id} duration={currentTrack.duration} isPlaying={isPlaying} motionEnabled={settings.motionEnabled}
+        onTogglePlay={handleTogglePlay} lyricStyle={lyricStyle} onStyleChange={setLyricStyle}/>
 
       {/* Floating Bottom Player Controls Dock */}
       <PlayerControls

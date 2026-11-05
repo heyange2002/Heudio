@@ -8,6 +8,7 @@ import {TopBar} from '../src/components/TopBar';
 import {AgentCompanion} from '../src/components/AgentCompanion';
 import {ProviderSettingsModal} from '../src/components/ProviderSettingsModal';
 import {MusicQueue} from '../src/components/MusicQueue';
+import {QQMusicPanel} from '../src/components/QQMusicPanel';
 import {LyricsView} from '../src/components/LyricsView';
 import {LyricsModal} from '../src/components/LyricsModal';
 import AccessGate from '../src/AccessGate';
@@ -120,7 +121,7 @@ test('a long music queue renders one song per row with metadata and selected pla
  const list=document.querySelector('section[aria-label="播放队列"]')!;
  assert.equal(list.querySelectorAll('li').length,30);assert.equal(list.querySelectorAll('img').length,30);
  assert.equal(list.querySelector('button[aria-current="true"]')?.getAttribute('aria-label'),'播放 长歌名 2 · 歌手 2');
- const button=list.querySelectorAll('button')[10];await act(()=>button.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));assert.deepEqual(selected,['song10']);
+ const button=list.querySelectorAll('li button')[10];await act(()=>button.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));assert.deepEqual(selected,['song10']);
  await act(()=>root.unmount());page.window.close();
 });
 
@@ -170,4 +171,63 @@ test('lyrics preview keeps four nearby lines; the full modal supports seeking, k
   await act(()=>page.window.dispatchEvent(new page.window.KeyboardEvent('keydown',{key:'Escape'})));
   assert.equal(document.querySelector('[role="dialog"]'),null);assert.equal(document.activeElement,expand);assert.equal(document.body.style.overflow,'');
  }finally{await act(()=>root.unmount());page.window.close();}
+});
+
+test('lyric styles keep seeking and translation, share selection, and respect disabled motion', async () => {
+ const {page,root}=dom();page.window.matchMedia=()=>({matches:true}) as any;
+ const seek:number[]=[],styles:string[]=[];let toggles=0;
+ const lyrics=[{timeSec:0,text:'第一句',translation:'First line'},{timeSec:10,text:'第二句',translation:'Second line'},{timeSec:20,text:'第三句'}];
+ function Harness(){const [style,setStyle]=useState<'flow'|'luminous'|'floating'>('flow');return <LyricsModal isOpen onClose={()=>{}} title="测试歌曲" artist="歌手" lyrics={lyrics} currentTime={15} duration={30} accentColor="#aaddcc" lyricStyle={style} onStyleChange={value=>{styles.push(value);setStyle(value);}} onSeek={time=>seek.push(time)} isPlaying onTogglePlay={()=>toggles++} motionEnabled={false}/>;}
+ try {
+  await act(()=>root.render(<Harness/>));
+  const click=async(button:Element)=>act(()=>button.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
+  const choose=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===name)!;
+  for(const label of ['流光','浮游']){
+   await click(choose(label));
+   assert.equal(choose(label).getAttribute('aria-pressed'),'true');
+   assert.equal(document.querySelector('[data-motion]')?.getAttribute('data-motion'),'false');
+   assert.match(document.querySelector('[aria-current="true"]')!.getAttribute('aria-label')!,/00:10 第二句/);
+   assert(document.body.textContent?.includes('Second line'));
+   await click(document.querySelectorAll('.lyrics-neighbor')[1]);
+  }
+  assert.deepEqual(styles,['luminous','floating']);assert.deepEqual(seek,[20,20]);
+  await click(document.querySelector('[aria-label="暂停播放"]')!);assert.equal(toggles,1);
+  assert.equal(document.querySelector<HTMLInputElement>('[aria-label="沉浸歌词播放进度"]')!.value,'15');
+  await click(document.querySelector('[aria-label="切换双语释义"]')!);assert(!document.body.textContent?.includes('Second line'));
+  await click(choose('云阶'));assert.equal(document.querySelectorAll('button[aria-label^="跳转到"]').length,3);
+ } finally {await act(()=>root.unmount());page.window.close();}
+});
+
+test('playlist list plays a whole playlist with one click, appends all results, and preserves the queue on empty or failed loads', async () => {
+ const {page,root}=dom(),oldFetch=globalThis.fetch;
+ const played:{songs:any[];title:string}[]=[],appended:{songs:any[];title:string}[]=[];
+ const songs=Array.from({length:245},(_,i)=>({mid:'list'+i,title:'歌单歌曲'+i,artist:'歌手',duration:180}));
+ let failLaterPage=false;
+ const paths:string[]=[];
+ globalThis.fetch=async(url)=>{
+  const path=String(url);paths.push(path);
+  if(failLaterPage && path.includes('offset='))return Response.json({error:'后续页读取失败'},{status:502});
+  if(path.endsWith('/login/status'))return Response.json({data:{}});
+  if(path.endsWith('/user/playlist'))return Response.json({playlist:[{tid:'123',title:'长歌单'},{tid:'empty',title:'空歌单'},{tid:'failed',title:'离线歌单'},{dirid:0,title:'喜欢收藏'}]});
+  if(path.includes('failed'))return Response.json({error:'连接失败'},{status:502});
+  if(path.includes('empty'))return Response.json({songs:[]});
+  const offset=Number(new URL(path,'https://soundisle.test').searchParams.get('offset') || 0);
+  return Response.json({songs:songs.slice(offset,offset+100),total:songs.length,more:offset+100<songs.length});
+ };
+ const click=async(button:Element)=>act(async()=>{button.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,10));});
+ try {
+  await act(async()=>root.render(<QQMusicPanel onPlay={()=>{}} onQueue={(songs,title)=>played.push({songs,title})} onAppend={(songs,title)=>appended.push({songs,title})} queue={[]} queueTitle="当前歌单" onRecommend={()=>{}}/>));
+  await click([...document.querySelectorAll('button')].find(b=>b.textContent==='我的歌单')!);
+  await click(document.querySelector('[aria-label="播放歌单 长歌单"]')!);
+  assert(paths.some(path=>path.includes('offset=200')));
+  assert.equal(played.length,1);assert.equal(played[0].title,'长歌单');assert.equal(played[0].songs.length,245);
+  await click([...document.querySelectorAll('button')].find(b=>b.textContent==='追加到当前歌单')!);
+  assert.equal(appended[0].songs.length,245);assert.equal(appended[0].title,'长歌单');
+  await click(document.querySelector('[aria-label="查看歌单 长歌单"]')!);assert.equal(played.length,1);
+  await click(document.querySelector('[aria-label="播放歌单 空歌单"]')!);assert.equal(played.length,1);assert.match(document.querySelector('[role="alert"]')!.textContent!,/暂无可用歌曲/);
+  await click(document.querySelector('[aria-label="播放歌单 离线歌单"]')!);assert.equal(played.length,1);assert.match(document.querySelector('[role="alert"]')!.textContent!,/连接失败/);
+  await click(document.querySelector('[aria-label="播放歌单 喜欢收藏"]')!);assert(paths.some(path=>path.endsWith('dirid=0')));assert.equal(played.length,2);
+  failLaterPage=true;
+  await click(document.querySelector('[aria-label="播放歌单 长歌单"]')!);assert.equal(played.length,2);assert.match(document.querySelector('[role="alert"]')!.textContent!,/后续页读取失败/);
+ } finally {await act(()=>root.unmount());page.window.close();globalThis.fetch=oldFetch;}
 });

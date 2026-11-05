@@ -5,7 +5,7 @@ import { formatTime } from '../utils/sceneAnalyzer';
 export function MusicQueue({songs,title,currentMid,isPlaying,onPlay}:{songs:QQSong[];title:string;currentMid?:string;isPlaying?:boolean;onPlay:(song:QQSong)=>void}) {
   if(!songs.length)return null;
   return <section aria-label="播放队列" className="border-t border-stone-800 pt-4 space-y-3">
-    <div className="flex items-baseline justify-between gap-3"><h3 className="text-sm font-semibold text-amber-200 truncate">{title}</h3><span className="text-xs text-stone-500 shrink-0">{songs.length} 首</span></div>
+    <div className="flex items-baseline justify-between gap-3"><h3 className="text-sm font-semibold text-amber-200 truncate">{title}</h3><div className="flex shrink-0 items-center gap-3"><span className="text-xs text-stone-500">{songs.length} 首</span><button type="button" aria-label="播放当前歌单" onClick={()=>onPlay(songs[0])} className="flex items-center gap-1 text-xs text-amber-300"><Play className="h-3.5 w-3.5" aria-hidden="true"/>播放歌单</button></div></div>
     <ol className="max-h-96 overflow-y-auto space-y-1 pr-1">
       {songs.map((song,index)=>{const active=song.mid===currentMid;return <li key={song.mid}>
         <button type="button" aria-label={`播放 ${song.title} · ${song.artist}`} aria-current={active?'true':undefined} onClick={()=>onPlay(song)}

@@ -28,3 +28,10 @@ test('invalid storage cannot break startup or restore an invalid position', () =
   }
   assert.equal(restorePlaybackSession({ songs: [song], currentMid: 'deleted', position: 40 }).currentTime, 0);
 });
+
+test('large queues restore every song and preserve selection beyond the old 500-song cutoff', () => {
+  const songs = Array.from({length: 650}, (_,i) => ({mid:'track'+i,title:'歌曲'+i,artist:'歌手',album:'',duration:180,coverUrl:''}));
+  const restored = restorePlaybackSession({songs,queue:songs,currentMid:'track620',position:42,title:'完整歌单'});
+  assert.equal(restored.tracks.length,650);assert.equal(restored.queue.length,650);
+  assert.equal(restored.currentTrackIndex,620);assert.equal(restored.currentTime,42);
+});

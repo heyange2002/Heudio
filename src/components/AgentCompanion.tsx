@@ -130,8 +130,8 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
                     {msg.playlist.songs.map((song, i) => <li key={song.mid}>{i + 1}. {song.title} · {song.artist}</li>)}
                   </ol>
                   <div className="mt-3 flex gap-3 text-xs text-amber-200">
-                    <button type="button" onClick={() => onPlaylistAction?.(msg.playlist!, 'play', msg.playlistScene)}>播放第一首</button>
-                    <button type="button" onClick={() => onPlaylistAction?.(msg.playlist!, 'enqueue', msg.playlistScene)}>整个歌单加入队列</button>
+                    <button type="button" onClick={() => onPlaylistAction?.(msg.playlist!, 'play', msg.playlistScene)}>播放歌单</button>
+                    <button type="button" onClick={() => onPlaylistAction?.(msg.playlist!, 'enqueue', msg.playlistScene)}>追加到当前歌单</button>
                   </div>
                 </div> : null}
 

@@ -20,3 +20,12 @@ export function readLocal<T>(key: string, fallback: T): T {
 export function saveLocal(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* Current session remains usable. */ }
 }
+
+// Preserve the existing order; repeated appends never duplicate a song.
+export function mergeSongs(current: QQSong[], incoming: QQSong[]): QQSong[] {
+  const seen = new Set<string>();
+  return [...current, ...incoming].filter(song => {
+    if (seen.has(song.mid)) return false;
+    seen.add(song.mid); return true;
+  });
+}

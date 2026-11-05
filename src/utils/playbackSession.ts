@@ -12,7 +12,7 @@ export const trackSong = (track: MusicTrack): QQSong => ({
 function songs(value: unknown): QQSong[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
-  return value.slice(0, 500).flatMap(song => {
+  return value.flatMap(song => {
     if (!song || typeof song.mid !== 'string' || !/^[a-zA-Z0-9]+$/.test(song.mid) || seen.has(song.mid) ||
       typeof song.title !== 'string' || typeof song.artist !== 'string') return [];
     seen.add(song.mid);

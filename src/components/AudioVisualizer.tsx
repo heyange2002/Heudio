@@ -1,3 +1,5 @@
+import { AmbientBackdrop } from './AmbientBackdrop';
+import { useMotionPreference } from '../hooks/useMotionPreference';
 import { TrackCover } from './TrackCover';
 import React, { useEffect, useRef, useState } from 'react';
 import { MusicTrack } from '../types/music';
@@ -19,12 +21,13 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   onToggleMotion,
   pureMusicMode,
 }) => {
-  const [motionStyle, setMotionStyle] = useState(() => { try { return localStorage.getItem('soundisle:motion-style') === 'spectrum' ? 'spectrum' : 'orbit'; } catch { return 'orbit'; } });
+  const [motionStyle, setMotionStyle] = useState(() => { try { const saved = localStorage.getItem('soundisle:motion-style'); return saved === 'spectrum' || saved === 'orbit' ? saved : 'nebula'; } catch { return 'nebula'; } });
+  const canAnimate = useMotionPreference(motionEnabled);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!motionEnabled) {
+    if (!canAnimate || motionStyle === 'nebula') {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
@@ -44,6 +47,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
       const width = canvas.width;
       const height = canvas.height;
 
+      ctx.globalAlpha = 1;
       ctx.clearRect(0, 0, width, height);
 
       // Get real frequency data from audio engine
@@ -94,7 +98,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           ctx.fillStyle = currentTrack.themeColors.accent; ctx.globalAlpha = 0.4 + val * 0.6;
           ctx.fillRect(i * barWidth + 2, height - 16 - val * 130, barWidth - 4, Math.max(3, val * 130));
         }
-        animationFrameRef.current = requestAnimationFrame(render); return;
+        if (isPlaying && !document.hidden) animationFrameRef.current = requestAnimationFrame(render); return;
       }
       // Draw outer audio reactive bars
       for (let i = 0; i < barCount; i++) {
@@ -140,17 +144,22 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
       ctx.restore();
 
-      animationFrameRef.current = requestAnimationFrame(render);
+      if (isPlaying && !document.hidden) animationFrameRef.current = requestAnimationFrame(render);
     };
 
-    render();
+    const sync = () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (!document.hidden) render();
+    };
+    sync(); document.addEventListener('visibilitychange', sync);
 
     return () => {
+      document.removeEventListener('visibilitychange', sync);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [motionEnabled, isPlaying, currentTrack, motionStyle]);
+  }, [canAnimate, isPlaying, currentTrack, motionStyle]);
 
   return (
     <section aria-label="专辑动效"
@@ -158,6 +167,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         pureMusicMode ? 'min-h-[500px] lg:min-h-[580px]' : 'h-[clamp(300px,calc(100dvh-27rem),440px)] min-h-[300px] md:shrink-0'
       }`}
     >
+      {motionStyle === 'nebula' && <AmbientBackdrop accentColor={currentTrack.themeColors.accent} glow={currentTrack.themeColors.glow} coverUrl={currentTrack.coverUrl} isPlaying={isPlaying} motionEnabled={canAnimate}/>}
       {/* Dynamic ambient color glow backdrop */}
       <div
         className="absolute inset-0 pointer-events-none opacity-25 transition-opacity duration-700"
@@ -166,7 +176,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
         }}
       />
 
-      {motionEnabled ? (
+      {canAnimate && motionStyle !== 'nebula' ? (
         <canvas
           ref={canvasRef}
           width={600}
@@ -174,13 +184,13 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           className="absolute inset-0 w-full h-full object-contain pointer-events-none"
         />
       ) : (
-        <div aria-hidden="true" className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div aria-hidden="true" className={`${motionStyle === 'nebula' ? 'hidden' : ''} absolute inset-0 flex items-center justify-center pointer-events-none`}>
           <div className="w-64 h-64 rounded-full border border-stone-700/30" style={{ boxShadow: `0 0 60px ${currentTrack.themeColors.glow}` }}/>
         </div>
       )}
 
       <div aria-label="动效样式" className="absolute top-3 right-3 z-20 flex gap-1 p-1 rounded-lg bg-stone-950/60 border border-stone-800">
-        {([['orbit', '环绕'], ['spectrum', '频谱']] as const).map(([value, label]) => <button key={value} aria-pressed={motionStyle === value} onClick={() => { setMotionStyle(value); try { localStorage.setItem('soundisle:motion-style', value); } catch {} }} className={`px-2 py-1 text-[11px] rounded-md ${motionStyle === value ? 'text-amber-300 bg-stone-800' : 'text-stone-500 hover:text-stone-200'}`}>{label}</button>)}
+        {([['nebula', '流云'], ['orbit', '环绕'], ['spectrum', '频谱']] as const).map(([value, label]) => <button key={value} aria-pressed={motionStyle === value} onClick={() => { setMotionStyle(value); try { localStorage.setItem('soundisle:motion-style', value); } catch {} }} className={`px-2 py-1 text-[11px] rounded-md ${motionStyle === value ? 'text-amber-300 bg-stone-800' : 'text-stone-500 hover:text-stone-200'}`}>{label}</button>)}
       </div>
       {/* Center Track Artwork & Title */}
       <div className={`relative z-10 flex flex-col items-center ${pureMusicMode?'p-6':'p-4'} text-center max-w-md`}>

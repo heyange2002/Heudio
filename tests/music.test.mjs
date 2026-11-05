@@ -147,3 +147,9 @@ test('mood retrieval retries the requested style when a compound scene query has
   const songs=await recommendByMood(async query=>{queries.push(query);return queries.length===1?[]:[song];},{mood:'烦躁',style:'爵士',scene:'雨天',count:5});
   assert.deepEqual(queries,['舒缓 钢琴 爵士 雨天','爵士']);assert.equal(songs[0].mid,song.mid);
 });
+
+test('playlist normalization retains the entire catalog beyond the old 30-song cutoff', () => {
+ const songs = Array.from({length:120},(_,i)=>({...song,mid:'full'+i}));
+ const result=normalizeSongs({cdlist:[{songlist:[...songs,songs[0],null,{mid:'../bad'}]}]});
+ assert.equal(result.length,120);assert.equal(result.at(-1).mid,'full119');
+});
