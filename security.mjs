@@ -1,13 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isMediaRequest } from './cloudflare/playback.mjs';
-import { musicIdentityCookie } from './shared/music-identity.mjs';
+import { cookieValue, MUSIC_COOKIE, MUSIC_COOKIE_SECONDS, musicIdentityCookie } from './shared/music-identity.mjs';
 import { isAccessCode } from './shared/access-code.mjs';
 
 // Authentication secrets never enter the frontend bundle. TLS handles encryption.
-export function createSecurity({ key, production = false, desktop = false, ttl = 3600000, now = Date.now }) {
-  if (!desktop && !isAccessCode(key)) throw Error('APP_ACCESS_KEY must contain exactly 4 digits');
+export function createSecurity({ key, production = false, desktop = false, mobile = false, ttl = 3600000, now = Date.now }) {
+  if (!desktop && !mobile && !isAccessCode(key)) throw Error('APP_ACCESS_KEY must contain exactly 4 digits');
   const digest = value => createHash('sha256').update(value).digest();
-  const expected = digest(desktop ? randomBytes(32) : key), sessions = new Map(), attempts = new Map();
+  const expected = digest(desktop || mobile ? randomBytes(32) : key), sessions = new Map(), attempts = new Map();
   const cookie = 'soundisle_session';
   const deny = (res, status, error) => res.status(status).json({ error });
   const tokenOf = req => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(cookie + '='))?.slice(cookie.length + 1);
@@ -27,6 +27,25 @@ export function createSecurity({ key, production = false, desktop = false, ttl =
     if (req.headers['sec-fetch-site'] === 'cross-site' || (req.headers['x-soundisle-client'] !== 'web' && !isMediaRequest(req.method, req.path))) return deny(res, 403, '请求来源无效');
     const origin = req.headers.origin;
     if (origin && origin !== `${req.protocol}://${req.get('host')}`) return deny(res, 403, '请求来源无效');
+    if (mobile) {
+      // Mobile service has no access lock. Cookies identify each device's QQ grant,
+      // memory and media tickets; they are not an access-code authorization barrier.
+      const incoming = req.headers.cookie || '';
+      const saved = tokenOf(req);
+      const id = /^[a-f0-9]{64}$/.test(saved || '') ? saved : randomBytes(32).toString('hex');
+      const parts = incoming.split(';').map(s => s.trim()).filter(s => s && !s.startsWith(cookie + '='));
+      parts.push(`${cookie}=${id}`);
+      const deviceCookie = musicIdentityCookie(parts.join('; '), req.secure);
+      req.headers.cookie = [...parts.filter(s => !s.startsWith(MUSIC_COOKIE + '=')), deviceCookie.split(';')[0]].join('; ');
+      if (id !== saved || !/^[a-f0-9]{64}$/.test(cookieValue(incoming, MUSIC_COOKIE) || '') || req.path === '/auth/session') {
+        res.setHeader('Set-Cookie', [`${cookie}=${id}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${MUSIC_COOKIE_SECONDS}${req.secure ? '; Secure' : ''}`, deviceCookie]);
+      }
+      if (req.path === '/auth/session') {
+        if (!['GET', 'POST', 'DELETE'].includes(req.method)) return deny(res, 405, '方法不支持');
+        return res.json({ authenticated: true, mobile: true });
+      }
+      return next();
+    }
     const id = tokenOf(req), authenticated = id && sessions.has(id);
     if (req.path === '/auth/session' && req.method === 'GET') {
       if (desktop && !authenticated) {

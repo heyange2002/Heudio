@@ -1,11 +1,13 @@
 import { apiFetch } from '../api';
 import { MusicTrack } from '../types/music';
 import { DEFAULT_EQ, EQ_BANDS, normalizeEqualizer, type EqualizerSettings } from './equalizer';
+import { AndroidAudioEngine, nativeAudioBridge } from './nativeAudio';
 
 export interface PlaybackFailure { kind: 'unavailable' | 'other'; trackId: string; }
 class UnavailableTrackError extends Error {}
 
 export class SoundIsleAudioEngine {
+  readonly isNative = false as const;
   private remoteAudio: HTMLAudioElement | null = null;
   private playGeneration = 0;
   private playbackController?: AbortController;
@@ -187,4 +189,5 @@ export class SoundIsleAudioEngine {
     }
   }
 }
-export const audioEngine = new SoundIsleAudioEngine();
+const nativeBridge = nativeAudioBridge();
+export const audioEngine = nativeBridge ? new AndroidAudioEngine(nativeBridge) : new SoundIsleAudioEngine();

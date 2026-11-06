@@ -91,3 +91,44 @@ test('existing authenticated browsers gain a stable identity using the legacy se
  assert.equal(result.cookies[0].split(';')[0],'soundisle_music_device='+old.split('=')[1]);
  assert.equal(call(gate,{path:'/auth/session',method:'GET'}).cookies,undefined);
 });
+
+test('mobile has no access-code gate and creates stable per-device cookies across restarts and expiry', () => {
+ let time=0;
+ let gate=createSecurity({mobile:true,now:()=>time,ttl:10});
+ const first=call(gate,{path:'/auth/session',method:'GET'});
+ assert.deepEqual(first.body,{authenticated:true,mobile:true});
+ const cookies=first.cookies.map(c=>c.split(';')[0]).join('; ');
+ assert.match(cookies,/soundisle_session=[a-f0-9]{64}/);
+ assert.match(cookies,/soundisle_music_device=[a-f0-9]{64}/);
+ assert(first.cookies.every(c=>c.includes('HttpOnly; SameSite=Strict; Path=/api; Max-Age=15552000')));
+ time=100000;
+ gate=createSecurity({mobile:true,now:()=>time});
+ const headers={'x-soundisle-client':'web',cookie:cookies};
+ assert(call(gate,{headers}).next);
+ const reopened=call(gate,{headers,path:'/auth/session',method:'GET'});
+ assert.equal(reopened.cookies.map(c=>c.split(';')[0]).join('; '),cookies);
+ assert.deepEqual(call(gate,{headers,path:'/auth/session',method:'DELETE'}).body,{authenticated:true,mobile:true});
+ const other=call(gate,{path:'/auth/session',method:'GET'});
+ assert.notEqual(other.cookies[0],first.cookies[0]);
+ const legacy='a'.repeat(64),device='b'.repeat(64);
+ const migrated=call(gate,{path:'/auth/session',method:'GET',headers:{'x-soundisle-client':'web',cookie:`soundisle_session=${legacy}; soundisle_music_device=${device}`}});
+ assert.equal(migrated.cookies[0].split(';')[0],`soundisle_session=${legacy}`);
+ assert.equal(migrated.cookies[1].split(';')[0],`soundisle_music_device=${device}`);
+});
+
+test('passwordless mobile still checks request origins and TLS and supplies identity before the first API call', () => {
+ const gate=createSecurity({mobile:true});
+ assert.equal(call(gate,{headers:{}}).status,403);
+ assert.equal(call(gate,{headers:{'x-soundisle-client':'web',origin:'https://other.example'}}).status,403);
+ assert.equal(call(gate,{headers:{'x-soundisle-client':'web','sec-fetch-site':'cross-site'}}).status,403);
+ assert.equal(call(gate,{socket:{remoteAddress:'192.0.2.1'}}).status,426);
+ assert.equal(call(createSecurity({mobile:true,production:true}),{}).status,426);
+ const remote=call(gate,{socket:{remoteAddress:'192.0.2.1'},secure:true,protocol:'https',path:'/auth/session',method:'GET'});
+ assert.equal(remote.body.authenticated,true);
+ assert(remote.cookies.every(c=>c.endsWith('; Secure')));
+ const headers={'x-soundisle-client':'web'};
+ assert(call(gate,{headers}).next);
+ assert.match(headers.cookie,/soundisle_session=[a-f0-9]{64}/);
+ assert.match(headers.cookie,/soundisle_music_device=[a-f0-9]{64}/);
+ assert.throws(()=>createSecurity({key:''}),/APP_ACCESS_KEY/);
+});
