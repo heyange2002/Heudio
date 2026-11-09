@@ -46,7 +46,7 @@ test(
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(data));
     });
-    const start = async (mobile = true) => {
+    const start = async (mobile = true, apiKey = "") => {
       mobileMode = mobile;
       child = spawn(process.execPath, ["--import", "tsx", "server.ts"], {
         cwd: path.resolve(import.meta.dirname, ".."),
@@ -60,6 +60,7 @@ test(
           SOUNDISLE_DATA_DIR: dir,
           SOUNDISLE_ENV_FILE: path.join(dir, "absent.env"),
           APP_ACCESS_KEY: mobile ? "" : "0472",
+          MOBILE_API_KEY: apiKey,
           MINIMAX_API_KEY: "",
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -295,6 +296,97 @@ test(
         (await (await call("/api/voice/config")).json()).configured,
         false,
       );
+      await stop();
+      const apiKey = "integration-mobile-api-key-".repeat(2);
+      await start(true, apiKey);
+      assert.equal((await call("/api/voice/config")).status, 401);
+      assert.deepEqual(await (await call("/api/auth/session")).json(), {
+        authenticated: false,
+        apiKeyRequired: true,
+      });
+      assert.equal(
+        (
+          await call("/api/auth/session", {
+            method: "POST",
+            headers: { "X-Api-Key": "wrong" },
+          })
+        ).status,
+        401,
+      );
+      const grant = await call("/api/auth/session", {
+        method: "POST",
+        headers: { "X-Api-Key": apiKey },
+      });
+      assert.equal(grant.status, 200);
+      const grantText = await grant.text();
+      assert(!grantText.includes(apiKey));
+      cookie = grant.headers
+        .getSetCookie()
+        .map((c) => c.split(";")[0])
+        .join("; ");
+      const keyPhoneCookie = cookie;
+      const qr = await (
+        await call("/api/music/login/qr/key?channel=qq")
+      ).json();
+      const codeResponse = await call("/api/mobile/qq-display", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: qr.data.unikey, channel: "qq" }),
+      });
+      const pairing = await codeResponse.json();
+      assert.match(pairing.code, /^\d{4}$/);
+      cookie = "";
+      const pair = await call("/api/mobile/qq-display/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: pairing.code }),
+      });
+      assert.equal(pair.status, 200);
+      const pairedImage = await pair.json();
+      assert.equal(pairedImage.image, qrImage);
+      assert.deepEqual(Object.keys(pairedImage).sort(), [
+        "channel",
+        "expiresAt",
+        "image",
+      ]);
+      const pairCookie = pair.headers.getSetCookie().join("; ");
+      assert(pairCookie.includes("HttpOnly"));
+      assert(pairCookie.includes("Path=/api/mobile/qq-display/view"));
+      assert(!pairCookie.includes("soundisle_session="));
+      cookie = pair.headers
+        .getSetCookie()
+        .map((c) => c.split(";")[0])
+        .join("; ");
+      assert.equal((await call("/api/mobile/qq-display/view")).status, 200);
+      assert.equal((await call("/api/voice/config")).status, 401);
+      assert.equal(
+        (await call("/api/mobile/qq-display", { method: "DELETE" })).status,
+        401,
+      );
+      assert.equal(
+        (await call("/api/mobile/qq-display?code=" + pairing.code)).status,
+        401,
+      );
+      cookie = keyPhoneCookie;
+      await call("/api/mobile/qq-display?id=" + pairing.id, {
+        method: "DELETE",
+      });
+      assert.equal(
+        (
+          await call("/api/mobile/qq-display/view", {
+            headers: { Cookie: pairCookie },
+          })
+        ).status,
+        404,
+      );
+      for (const path of [
+        "/api/music/config",
+        "/api/voice/config",
+        "/api/agent/config",
+      ])
+        assert.equal((await call(path)).status, 200);
+      await call("/api/auth/session", { method: "DELETE" });
+      assert.equal((await call("/api/voice/config")).status, 401);
       await stop();
       await start(false);
       assert.equal((await call("/api/voice/config")).status, 401);

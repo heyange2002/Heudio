@@ -438,8 +438,8 @@ export function QQSettings({ onUpdate }: { onUpdate: () => void }) {
               role="status"
             >
               <p>1. 在电脑打开同一个声屿服务：</p>
-              <code>{location.origin}/#qq-display</code>
-              <p>2. 输入下方 6 位显示码：</p>
+              <code>{location.origin}/mobile/qq-display</code>
+              <p>2. 输入下方 4 位配对码，无需填写 API Key：</p>
               <strong className="qr-display-code" aria-label="二维码显示码">
                 {display.code}
               </strong>

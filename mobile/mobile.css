@@ -501,6 +501,8 @@ input::placeholder {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .mini-player {
+  touch-action: pan-y;
+  user-select: none;
   display: flex;
   align-items: center;
   position: relative;

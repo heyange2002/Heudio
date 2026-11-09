@@ -6,7 +6,7 @@ test("a separate screen sees only the QR image; replacement, owner cleanup and e
   let clock = 1000;
   const store = createQQDisplayStore({ now: () => clock });
   const first = store.create("phone", image, "qq");
-  assert.match(first.code, /^\d{6}$/);
+  assert.match(first.code, /^\d{4}$/);
   assert.match(first.id, /^[a-f0-9]{32}$/);
   assert.deepEqual(store.read("computer", first.code), {
     image,
@@ -37,4 +37,40 @@ test("display codes reject non-image content, bound attempts and reset the limit
   assert.throws(() => store.read("viewer", item.code), /尝试次数/);
   clock += 60000;
   assert.equal(store.read("viewer", item.code).channel, "qqmusic");
+});
+
+test("four-digit pairing is single-use and grants only an expiring QR viewer capability", () => {
+  let clock = 0;
+  const store = createQQDisplayStore({ now: () => clock });
+  const item = store.create("phone", image, "qq");
+  assert.match(item.code, /^\d{4}$/);
+  const paired = store.pair("ip-one", item.code);
+  assert.match(paired.token, /^[a-f0-9]{64}$/);
+  assert.deepEqual(Object.keys(paired.display).sort(), [
+    "channel",
+    "expiresAt",
+    "image",
+  ]);
+  assert.deepEqual(store.view(paired.token), paired.display);
+  assert.throws(() => store.pair("ip-two", item.code), /已使用/);
+  assert.throws(() => store.view(item.code), /结束或过期/);
+  store.create("phone", image, "qq");
+  assert.throws(() => store.view(paired.token), /结束或过期/);
+  const current = store.create("phone", image, "wechat"),
+    next = store.pair("ip-one", current.code);
+  clock = 120000;
+  assert.throws(() => store.view(next.token), /结束或过期/);
+});
+test("anonymous four-digit pairing enforces both per-IP and global attempt budgets", () => {
+  let clock = 0;
+  const store = createQQDisplayStore({ now: () => clock });
+  for (let i = 0; i < 5; i++)
+    assert.throws(() => store.pair("ip", "bad"), /错误或已过期/);
+  assert.throws(() => store.pair("ip", "bad"), /尝试过多/);
+  for (let i = 0; i < 25; i++)
+    assert.throws(() => store.pair("other-" + i, "bad"), /错误或已过期/);
+  assert.throws(() => store.pair("new-ip", "bad"), /尝试过多/);
+  clock = 60001;
+  const item = store.create("phone", image, "qq");
+  assert(store.pair("ip", item.code).token);
 });

@@ -15,5 +15,17 @@
   "instanceProfileName": "SoundisleEC2Profile",
   "launchTemplateDefaultVersion": 2,
   "verifiedAt": "2026-11-04",
-  "cloudfrontStatus": "Deployed"
+  "cloudfrontStatus": "Deployed",
+  "mobileApi": {
+    "version": "0.2.8",
+    "url": "https://music.kwill.cc.cd",
+    "viewerUrl": "https://music.kwill.cc.cd/mobile/qq-display",
+    "apiKeyRequired": true,
+    "release": "chat-latency-1794196197",
+    "verifiedAt": "2026-11-09T03:51:29.129580+00:00",
+    "unauthenticatedStatus": 401,
+    "authenticatedStatus": 200,
+    "viewerAuth": "single-use-four-digit-code",
+    "viewerApiKeyRequired": false
+  }
 }

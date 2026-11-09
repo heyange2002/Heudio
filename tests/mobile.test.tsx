@@ -9,6 +9,7 @@ import { QQSettings } from "../mobile/ServiceSettings";
 import { playlistSongs } from "../mobile/library";
 import { useSoundisle } from "../src/hooks/useSoundisle";
 import { audioEngine } from "../src/utils/audioEngine";
+import { useTrackSwipe } from "../mobile/useTrackSwipe";
 
 function setup() {
   const page = new JSDOM('<div id="root"></div>', {
@@ -55,6 +56,46 @@ const song = (mid: string) => ({
   album: "测试专辑",
   duration: 180,
   coverUrl: "",
+});
+test("mini player swipes skip tracks once, preserve taps and ignore vertical, short, cancelled and multi-touch gestures", async () => {
+  const { page, root } = setup();
+  let previous = 0, next = 0, opened = 0;
+  function Player() {
+    const swipe = useTrackSwipe(() => previous++, () => next++);
+    return <div className="mini-player" {...swipe}><button onClick={() => opened++}>track</button></div>;
+  }
+  const touch = (x: number, y: number, identifier = 1) => ({ clientX: x, clientY: y, identifier });
+  const emit = async (type: string, touches: object[], changedTouches = touches) => {
+    const event = new page.window.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, { touches, changedTouches });
+    await act(async () => document.querySelector('button')!.dispatchEvent(event));
+  };
+  const tap = async () => act(async () => document.querySelector('button')!.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 1 })));
+  try {
+    await act(async () => root.render(<Player />));
+    await emit('touchstart', [touch(250, 20)]);
+    await emit('touchend', [], [touch(100, 24)]);
+    await tap();
+    assert.equal(next, 1); assert.equal(opened, 0);
+    await emit('touchstart', [touch(80, 20)]);
+    await emit('touchend', [], [touch(230, 25)]);
+    await tap();
+    assert.equal(previous, 1); assert.equal(opened, 0);
+    await emit('touchstart', [touch(80, 20)]);
+    await emit('touchend', [], [touch(82, 20)]);
+    await tap(); assert.equal(opened, 1);
+    await emit('touchstart', [touch(250, 20)]);
+    await emit('touchmove', [touch(230, 80)]);
+    await emit('touchend', [], [touch(100, 90)]);
+    await emit('touchstart', [touch(250, 20)]);
+    await emit('touchend', [], [touch(220, 20)]);
+    await emit('touchstart', [touch(250, 20)]);
+    await emit('touchcancel', []);
+    await emit('touchend', [], [touch(100, 20)]);
+    await emit('touchstart', [touch(250, 20), touch(200, 20, 2)]);
+    await emit('touchend', [], [touch(100, 20)]);
+    assert.equal(next, 1); assert.equal(previous, 1);
+  } finally { await act(async () => root.unmount()); page.window.close(); }
 });
 test("mobile connects and reconnects without an access-code form or lock action", async () => {
   const { page, root, click } = setup();
@@ -212,7 +253,7 @@ test("QQ authorization refreshes successfully before disposing the polling reque
       });
       return Response.json({
         id: "display-id",
-        code: "123456",
+        code: "0123",
         expiresAt: Date.now() + 120000,
       });
     }
@@ -257,10 +298,12 @@ test("QQ authorization refreshes successfully before disposing the polling reque
     await click("在电脑显示二维码");
     assert.equal(
       document.querySelector('[aria-label="二维码显示码"]')?.textContent,
-      "123456",
+      "0123",
     );
     assert(
-      document.body.textContent?.includes("https://soundisle.test/#qq-display"),
+      document.body.textContent?.includes(
+        "https://soundisle.test/mobile/qq-display",
+      ),
     );
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1700));
@@ -438,14 +481,14 @@ test("computer QR display shows progress, keeps errors next to the button and re
       finishDisplay(
         Response.json({
           id: "test-display",
-          code: "654321",
+          code: "4567",
           expiresAt: Date.now() + 120000,
         }),
       ),
     );
     assert.equal(
       document.querySelector('[aria-label="二维码显示码"]')?.textContent,
-      "654321",
+      "4567",
     );
     assert(revealed);
     assert.equal(document.querySelector('[aria-busy="true"]'), null);

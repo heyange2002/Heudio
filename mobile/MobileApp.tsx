@@ -45,6 +45,7 @@ import { QQSettings, MiniMaxSettings } from "./ServiceSettings";
 import { request, music } from "./api";
 import { playlistSongs, type Playlist } from "./library";
 import { IconButton, Modal, Toast } from "./ui";
+import { useTrackSwipe } from "./useTrackSwipe";
 
 const sceneModes: SceneMode[] = ["rest", "focus", "sleep", "workout"];
 function initialSettings(): Partial<ServiceSettings> {
@@ -76,6 +77,7 @@ export default function MobileApp() {
     savedSettings,
     "请先搜索一首歌，或让阿屿为你选歌。",
   );
+  const trackSwipe = useTrackSwipe(core.handlePrev, core.handleNext);
   const {
     currentTrack: track,
     settings,
@@ -838,7 +840,7 @@ export default function MobileApp() {
               </button>
             </form>
           )}
-          <div className="mini-player">
+          <div className="mini-player" role="group" aria-label="当前播放，左滑下一首，右滑上一首" {...trackSwipe}>
             <button
               className="mini-track"
               onClick={() => {

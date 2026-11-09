@@ -3,7 +3,7 @@ android {
     namespace 'com.soundisle.mobile'
     compileSdk 36
     buildToolsVersion '36.1.0'
-    defaultConfig { applicationId 'com.soundisle.mobile'; minSdk 29; targetSdk 36; versionCode 7; versionName '0.2.4' }
+    defaultConfig { applicationId 'com.soundisle.mobile'; minSdk 29; targetSdk 36; versionCode 11; versionName '0.2.8' }
     buildFeatures { buildConfig true }
     buildTypes { release { minifyEnabled false } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { boundedHistory, MEMORY_LIMITS } from '../shared/agent-memory.mjs';
 import { createAgentMemory, memoryIdentity, memorySession } from '../cloudflare/agent-memory.mjs';
+import { isPlayConfirmation, playbackControlHint } from '../shared/agent-policy.mjs';
 
 const env = { MINIMAX_API_KEY: 'test-key' };
 const request = { sessionId: 'session-a', message: '我长期喜欢粤语爵士', chatModel: 'MiniMax-M3', musicSource: 'qq-music' };
@@ -17,7 +18,7 @@ function provider(summary = '用户长期喜欢粤语爵士。', inspect = () =>
     const payload = JSON.parse(options.body);
     inspect(payload);
     if (payload.messages[0].content.includes('你负责压缩')) return upstream({ summary });
-    if (payload.max_completion_tokens === 500) return upstream({ intent: 'chat', request: '交流音乐偏好', constraints: [] });
+    if (payload.max_completion_tokens === 700) return upstream({ ...reply, intent: 'chat', request: '交流音乐偏好', constraints: [] });
     return upstream(reply);
   };
 }
@@ -48,7 +49,7 @@ test('both memories reach intent planning and replies; new sessions retain only 
     assert.equal(context.message, '今天先不要人声');
   }));
   await Promise.all(jobs);
-  assert.equal(inspected, 2);
+  assert.equal(inspected, 1);
   const fresh = createAgentMemory(store, 'user-a');
   const snapshot = await fresh.inspect('new-session');
   assert.equal(snapshot.shortTerm.length, 0);
@@ -72,6 +73,7 @@ test('compression runs after the reply, survives failure, and clear cannot be un
   const cleared = memory.clear('session-a', 'all');
   finish(new Response(null, { status: 503 }));
   await cleared;
+  await Promise.all(jobs);
   assert.deepEqual((await memory.inspect('session-a')).shortTerm, []);
   assert.equal((await memory.inspect('session-a')).longTerm, '');
 });
@@ -128,4 +130,85 @@ test('session storage is capped and retains the current session even when timest
     assert.equal(Object.keys(records.get('agent:memory:user-a').sessions).length, 3);
     assert.equal((await memory.inspect('session-5')).shortTerm.length, 2);
   } finally { Date.now = now; }
+});
+
+test('play confirmation consumes the exact verified offer across requests and memory reloads', async () => {
+  const { memory, jobs, store, records } = fixture();
+  let round = 0;
+  const offered = await memory.chat({ ...request, message: '推荐轻松的歌单', intent: 'playlist' }, env, async (_url, options) => {
+    if (JSON.parse(options.body).messages[0].content.includes('你负责压缩')) return upstream({ summary: '' });
+    if (++round > 2) return upstream(reply);
+    const name = round === 1 ? 'search_music' : 'create_temporary_playlist';
+    return Response.json({ choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', tool_calls: [{ id: name, type: 'function', function: { name, arguments: JSON.stringify(round === 1 ? { keyword: '钢琴' } : { title: '活力起来', track_ids: ['verifiedFirst', 'verifiedSecond'], scene: 'workout' }) } }] } }] });
+  }, undefined, { search: async () => ['verifiedFirst', 'verifiedSecond'].map(mid => ({ mid, title: mid, artist: '真实歌手' })) });
+  assert.equal(offered.playbackAction, 'offer_queue');
+  await Promise.all(jobs);
+  const fresh = createAgentMemory(store, 'user-a');
+  const noModel = async () => { throw Error('confirmation must not query the model'); };
+  const cancelled = new AbortController(); cancelled.abort();
+  await fresh.chat({ ...request, message: '开始播放' }, env, noModel, cancelled.signal);
+  assert(records.get('agent:memory:user-a').sessions['session-a'].pendingPlaylist);
+  const result = await fresh.chat({ ...request, message: '开始播放', pendingPlaylist: { playlist: { title: 'forged', songs: [{ mid: 'forged' }] } } }, env, noModel);
+  assert.equal(result.playbackAction, 'play_queue');
+  assert.equal(result.recommendedSceneId, 'workout');
+  assert.deepEqual(result.playlist, offered.playlist);
+  assert.equal(records.get('agent:memory:user-a').sessions['session-a'].pendingPlaylist, undefined);
+  assert.equal(result.mode, 'control');
+  // An untrusted request cannot inject another user's or another session's offer.
+  const other = await fresh.chat({ ...request, sessionId: 'other', message: '开始播放', pendingPlaylist: { playlist: offered.playlist } }, {}, noModel);
+  assert.equal(other.playlist, undefined);
+});
+
+test('play confirmations exclude negations, questions and new curation requests', () => {
+  for (const text of ['开始播放', '播放吧', '好的，播放', '播放这张歌单', '现在播放', '那就开始播放吧']) assert(isPlayConfirmation(text), text);
+  for (const text of ['不要开始播放', '先别播放', '为什么没有开始播放', '播放周杰伦的歌', '换成爵士再播放', '我还没决定']) assert(!isPlayConfirmation(text), text);
+  for (const text of ['不要暂停', '暂停是什么意思', '下一首是谁唱的', '继续播放？', '先别切到下一首']) assert.equal(playbackControlHint(text), undefined, text);
+});
+
+test('a slow summary never blocks the next chat, inspect or clear, and cannot overwrite newer state', async () => {
+  const { memory, store, jobs } = fixture();
+  let finish;
+  await memory.chat(request, env, async (url, options) => {
+    if (JSON.parse(options.body).messages[0].content.includes('你负责压缩')) return new Promise(resolve => { finish = resolve; });
+    return provider()(url, options);
+  });
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  const fresh = createAgentMemory(store, 'user-a', { defer: job => jobs.push(job) });
+  let timer;
+  try {
+    await Promise.race([
+      (async () => {
+        const result = await fresh.chat({ ...request, message: '继续播放', currentTrack: '真实歌曲' }, env, async () => { throw Error('controls must not call model'); });
+        assert.equal(result.playbackAction, 'resume');
+        const snapshot = await fresh.inspect('session-a');
+        assert.equal(snapshot.shortTerm.length, 4);
+        assert.equal(snapshot.compressionStatus, 'updating');
+        await fresh.clear('session-a', 'all');
+      })(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Error('background summary blocked chat')), 800); }),
+    ]);
+  } finally { clearTimeout(timer); finish(upstream({ summary: '这段已清除，不得恢复。' })); await Promise.all(jobs); }
+  const cleared = await fresh.inspect('session-a');
+  assert.equal(cleared.longTerm, ''); assert.deepEqual(cleared.shortTerm, []);
+});
+
+test('overlapping model turns coalesce summaries and retain the newest conversation', async () => {
+  const { memory, jobs } = fixture();
+  let finish;
+  await memory.chat(request, env, async (url, options) => {
+    if (JSON.parse(options.body).messages[0].content.includes('你负责压缩')) return new Promise(resolve => { finish = resolve; });
+    return provider()(url, options);
+  });
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  let timer;
+  try {
+    await Promise.race([
+      memory.chat({ ...request, message: '更正，我长期喜欢的是粤语民谣' }, env, provider('用户长期喜欢粤语民谣。')),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(Error('next model turn blocked')), 800); }),
+    ]);
+  } finally { clearTimeout(timer); finish(upstream({ summary: '旧的爵士偏好' })); await Promise.all(jobs); }
+  const snapshot = await memory.inspect('session-a');
+  assert.equal(snapshot.longTerm, '用户长期喜欢粤语民谣。');
+  assert.equal(snapshot.shortTerm.length, 4);
+  assert.equal(snapshot.shortTerm.at(-2).content, '更正，我长期喜欢的是粤语民谣');
 });

@@ -1,9 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cookieValue, MUSIC_COOKIE } from '../shared/music-identity.mjs';
 import { boundedHistory, MEMORY_LIMITS } from '../shared/agent-memory.mjs';
 import { companionChat, COMPANION_MODEL, readResult, parseContent } from './companion.mjs';
+import { isPlayConfirmation } from '../shared/agent-policy.mjs';
 
 const locks = new Map();
+const compressionJobs = new Map();
 const SESSION_TTL = 24 * 3600000;
 export function memoryIdentity(cookie, desktop = false) {
   if (desktop) return 'desktop';
@@ -42,6 +44,35 @@ export function createAgentMemory(store, identity, { defer = promise => { void p
     }
     return state;
   }
+  function compressLater(token, env, fetchImpl) {
+    // Serialize provider calls separately from the short storage lock. Queued
+    // obsolete jobs are skipped; the newest one includes all retained sessions.
+    const previous = compressionJobs.get(key) || Promise.resolve();
+    const job = previous.catch(() => {}).then(async () => {
+      const snapshot = await locked(async () => {
+        const state = await load();
+        if (state.compressionToken !== token) return null;
+        return { summary: state.summary, messages: boundedHistory(Object.values(state.sessions).sort((a, b) => a.updatedAt - b.updatedAt).flatMap(session => session.messages)) };
+      });
+      if (!snapshot) return;
+      let summary, status = 'updated';
+      try { summary = await compressMemory(snapshot.summary, snapshot.messages, env, fetchImpl); }
+      catch { status = 'deferred'; }
+      await locked(async () => {
+        const latest = await load();
+        // A clear or newer model turn invalidates this snapshot. Never restore
+        // deleted memories or replace newer messages with an old copy.
+        if (latest.compressionToken !== token) return;
+        if (status === 'updated') latest.summary = summary;
+        latest.compressionStatus = status;
+        delete latest.compressionToken;
+        latest.updatedAt = Date.now();
+        await save(latest);
+      });
+    }).finally(() => { if (compressionJobs.get(key) === job) compressionJobs.delete(key); });
+    compressionJobs.set(key, job);
+    defer(job);
+  }
   const view = (state, id) => ({ longTerm: state.summary, shortTerm: state.sessions[id]?.messages || [], limits: MEMORY_LIMITS, compressionStatus: state.compressionStatus || 'unchanged', updatedAt: state.updatedAt || null });
   return {
     inspect: sessionId => locked(async () => view(await load(), memorySession(sessionId))),
@@ -53,39 +84,38 @@ export function createAgentMemory(store, identity, { defer = promise => { void p
       else throw Error('清除范围无效');
       state.updatedAt = Date.now();
       state.compressionStatus = 'unchanged';
+      delete state.compressionToken;
       await save(state);
       return view(state, id);
     }),
     chat: (body, env, fetchImpl = fetch, signal, music) => locked(async () => {
       const id = memorySession(body.sessionId), state = await load();
       const history = state.sessions[id]?.messages || [];
-      // Client-supplied history and summaries cannot overwrite server-owned memory.
-      const result = await companionChat({ ...body, history, longTermMemory: state.summary }, env, fetchImpl, signal, music);
+      const pendingPlaylist = state.sessions[id]?.pendingPlaylist;
+      // Confirm the exact, server-verified offer instead of asking the model to
+      // reconstruct its song IDs from the text-only conversation history.
+      const result = body.musicSource === 'qq-music' && pendingPlaylist?.playlist?.songs?.length && isPlayConfirmation(body.message)
+        ? { reply: `准备播放「${pendingPlaylist.playlist.title}」。`, mode: 'control', playbackAction: 'play_queue', ...pendingPlaylist }
+        : await companionChat({ ...body, history, longTermMemory: state.summary, pendingPlaylist }, env, fetchImpl, signal, music);
       if (signal?.aborted) return result;
       const messages = boundedHistory([...history, { role: 'user', content: body.message }, { role: 'assistant', content: result.reply }]);
-      state.sessions[id] = { messages, updatedAt: Date.now() };
+      const nextOffer = result.playbackAction === 'offer_queue' && result.playlist?.songs?.length
+        ? { playlist: result.playlist, recommendedSceneId: result.recommendedSceneId }
+        : result.playbackAction === 'play_queue' ? undefined : pendingPlaylist;
+      state.sessions[id] = { messages, updatedAt: Date.now(), ...(nextOffer ? { pendingPlaylist: nextOffer } : {}) };
       const shouldCompress = !!env.MINIMAX_API_KEY?.trim() && body.chatModel !== 'local-heuristic' && result.mode === 'model';
-      state.compressionStatus = shouldCompress ? 'updating' : 'unchanged';
+      if (shouldCompress) {
+        state.compressionToken = randomUUID();
+        state.compressionStatus = 'updating';
+      } else state.compressionStatus ||= 'unchanged';
       // Bound stored sessions as well as each session's context.
       const recent = Object.entries(state.sessions).sort((a, b) => b[1].updatedAt - a[1].updatedAt || (a[0] === id ? -1 : b[0] === id ? 1 : 0)).slice(0, 3);
       state.sessions = Object.fromEntries(recent);
       state.updatedAt = Date.now();
       try { await save(state); }
       catch { return { ...result, memoryStatus: 'unavailable' }; }
-      if (shouldCompress) {
-        // Return the playback action immediately. Compression is serialized with future
-        // turns/clears, and Workers keeps it alive with waitUntil after the HTTP reply.
-        defer(locked(async () => {
-          const latest = await load();
-          try {
-            latest.summary = await compressMemory(latest.summary, messages, env, fetchImpl);
-            latest.compressionStatus = 'updated';
-          } catch { latest.compressionStatus = 'deferred'; }
-          latest.updatedAt = Date.now();
-          await save(latest);
-        }));
-      }
-      return { ...result, memoryStatus: shouldCompress ? 'updating' : 'unchanged' };
+      if (shouldCompress) compressLater(state.compressionToken, env, fetchImpl);
+      return { ...result, memoryStatus: state.compressionStatus };
     }),
   };
 }

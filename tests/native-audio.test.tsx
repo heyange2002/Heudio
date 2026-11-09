@@ -200,6 +200,26 @@ test("the shared hook reconnects to a live native queue and detaches without pau
       }),
     );
     assert.equal(current!.qqQueue.length, 0);
+    let chatTurn = 0;
+    const offeredSongs = [{ ...songs[0], mid: 'offeredSong', title: '刚才推荐的歌曲' }];
+    globalThis.fetch = async (url) => String(url) === '/api/agent/chat'
+      ? Response.json({ reply: '准备好了。', mode: 'control', playbackAction: ++chatTurn === 1 ? 'offer_queue' : 'play_queue', playlist: { title: '刚才推荐的歌单', songs: offeredSongs } })
+      : Response.json({ data: {}, shortTerm: [], summary: '未知' });
+    await act(async () => current!.setSettings(previous => ({ ...previous, voiceAutoPlay: false })));
+    const beforeOffer = h.commands.filter(c => c.action === 'queue').length;
+    await act(async () => current!.handleSendMessage('推荐一个歌单'));
+    assert.equal(h.commands.filter(c => c.action === 'queue').length, beforeOffer);
+    assert.equal(current!.isPlaying, false);
+    await act(async () => current!.handleSendMessage('开始播放'));
+    const installed = h.commands.filter(c => c.action === 'queue').at(-1);
+    assert.equal(installed.mid, 'offeredSong');
+    assert.equal(installed.playing, true);
+    assert.equal(installed.restart, true);
+    assert.equal(current!.playbackConfirmed, false);
+    assert.equal(current!.agentStatus, '正在开始播放…');
+    await act(async () => h.state({ songs: offeredSongs, mid: 'offeredSong', title: '刚才推荐的歌单', playing: true, confirmed: true, position: 1 }));
+    assert.equal(current!.playbackConfirmed, true);
+    assert.equal(current!.agentStatus, '正在播放 · 刚才推荐的歌曲');
     const pauses = h.commands.filter((c) => c.action === "pause").length;
     await act(async () => root.unmount());
     assert.equal(h.commands.filter((c) => c.action === "pause").length, pauses);
