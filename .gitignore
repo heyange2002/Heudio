@@ -1,6 +1,8 @@
 node_modules/
 build/
 dist/
+dist-mobile/
+dist-mobile-web/
 coverage/
 .DS_Store
 .aistudio/

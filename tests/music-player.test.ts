@@ -18,6 +18,7 @@ test('QQ playback uses actual audio, supports seeking and voice ducking, and sur
     await new Promise(resolve => setImmediate(resolve)); assert.equal(audios.length, 0);
     audioEngine.playTrack(song, 15); complete(Response.json({ data: { playUrl: { real123: { url: 'https://app.test/api/music/stream/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } } } }));
     await new Promise(resolve => setImmediate(resolve)); assert.equal(audios.length, 1); assert.equal(audios[0].currentTime, 15); assert.equal(started.length, 1);
+    await new Promise(resolve => setTimeout(resolve, 700));
     audioEngine.seek(35); assert.equal(audios[0].currentTime, 35);
     audioEngine.setMasterVolume(0.8); audioEngine.setSpeechDucking(true); assert.equal(audios[0].volume, 0.05);
     audioEngine.setInputMuted(true); assert.equal(audios[0].volume, 0);
@@ -101,6 +102,39 @@ test('a smooth handoff fades at the current volume and pause cancels a pending t
     assert.deepEqual(started,['first']); assert.equal(engine.getIsPlaying(),false);
     engine.playTrack(song('first')); await tick();
     await engine.transitionToTrack(song('second'), 40); await tick();
-    assert.equal(started.at(-1),'second'); assert.equal(audios.at(-1).volume,0.4);
+    assert.equal(started.at(-1),'second');
+    await new Promise(resolve => setTimeout(resolve, 700)); assert.equal(audios.at(-1).volume,0.4);
   } finally {engine.pause();engine.clearPreload();globalThis.fetch=oldFetch;globalThis.Audio=oldAudio;}
+});
+
+test('play and pause fade smoothly at the selected volume; rapid resume cancels the old pause', async () => {
+  Object.assign(globalThis, { location: new URL('https://app.test/'), window: { dispatchEvent() {} } });
+  const oldFetch = globalThis.fetch, oldAudio = globalThis.Audio, audios: any[] = [];
+  globalThis.Audio = class {
+    volume = 1; currentTime = 24.5; paused = false; onended = null; onerror = null; ontimeupdate = null;
+    constructor(public src: string) { audios.push(this); }
+    play = async () => { this.paused = false; }; pause() { this.paused = true; } removeAttribute() {} load() {}
+  } as any;
+  globalThis.fetch = async () => Response.json({ data: { playUrl: { real: { url: '/api/music/stream/' + 'a'.repeat(48) } } } });
+  const engine = new SoundIsleAudioEngine(), song = qqTrack({ mid: 'real', title: '真实歌曲', artist: '', album: '', duration: 120, coverUrl: '' }, 'rest');
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  try {
+    engine.setMasterVolume(.4); engine.playTrack(song, 24.5);
+    await new Promise(resolve => setImmediate(resolve));
+    const audio = audios[0]; assert.equal(audio.volume, 0);
+    await wait(220); assert(audio.volume > 0 && audio.volume < .4);
+    await wait(500); assert.equal(audio.volume, .4);
+    engine.pause(650); assert.equal(audio.paused, false); assert.equal(engine.getIsPlaying(), false);
+    await wait(220); assert(audio.volume > 0 && audio.volume < .4);
+    await wait(500); assert.equal(audio.paused, true); assert.equal(audio.volume, 0);
+    assert.equal(engine.getElapsedSeconds(), 24.5);
+    engine.resume(); await wait(720);
+    const resumed = audios.at(-1); assert.equal(resumed.volume, .4);
+    engine.pause(650); await wait(150); engine.resume();
+    await wait(720); const latest = audios.at(-1);
+    assert.notEqual(latest, resumed); assert.equal(latest.paused, false); assert.equal(latest.volume, .4);
+    engine.setSpeechDucking(true); assert.equal(latest.volume, .05);
+    engine.pause(650); await wait(150); assert(latest.volume < .05);
+    engine.setInputMuted(true); assert.equal(latest.volume, 0);
+  } finally { engine.pause(); globalThis.fetch = oldFetch; globalThis.Audio = oldAudio; }
 });

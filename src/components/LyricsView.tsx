@@ -74,6 +74,6 @@ export const LyricsView: React.FC<LyricsViewProps> = ({ lyrics, currentTime, onS
         <button type="button" className="lyrics-neighbor" disabled={activeIndex >= lyrics.length - 1} onClick={() => onSeek(lyrics[activeIndex + 1].timeSec)}>{lyrics[activeIndex + 1]?.text || '余音，仍在'}</button>
         <div aria-hidden="true" className="lyrics-line-progress"><span style={{ transform: `scaleX(${progress})` }}/></div>
       </div>}
-    {immersive && <div className="lyrics-caption"><span className={`lyrics-status-dot ${isPlaying && animate ? 'is-playing' : ''}`}/>{isPlaying ? '让文字随音乐流动' : '音乐停驻，余韵未散'}<span className="ml-auto">点击歌词跳转</span></div>}
+    {immersive && <div className="lyrics-caption"><span className={`lyrics-status-dot ${isPlaying && animate ? 'is-playing' : ''}`}/>{isPlaying ? '让文字随音乐流动' : '音乐停驻，余韵未散'}</div>}
   </section>;
 };

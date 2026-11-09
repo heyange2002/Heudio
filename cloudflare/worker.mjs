@@ -2,7 +2,7 @@ import { musicRoute, createMusicClient } from './music.mjs';
 import { isMediaRequest } from './playback.mjs';
 import { transcribeSpeech } from './transcribe.mjs';
 import { remoteMusicStore, musicEnvironment } from './music-store.mjs';
-import { getWeather } from './context.mjs';
+import { getWeather, chatWeather } from './context.mjs';
 export { MusicStore } from './music-store.mjs';
 import { companionChat, companionConfig } from './companion.mjs';
 import { createAgentMemory, memoryIdentity } from './agent-memory.mjs';
@@ -56,7 +56,7 @@ export default {
    if(env.MUSIC&&body.musicSource==='qq-music') {
     const store=remoteMusicStore(env);music=await createMusicClient(request,await musicEnvironment(env,store),store);
    }
-   const weather=await getWeather(body.profile?.city);
+   const weather=chatWeather(body.profile?.city,fetch,promise=>ctx?.waitUntil(promise));
    return json(await (env.MUSIC?memory().chat({...body,weather:weather.summary},env,fetch,request.signal,music):companionChat({...body,weather:weather.summary},env,fetch,request.signal,music)));
   }catch{return json({error:'请求格式无效或服务暂时不可用'},400);}
  }

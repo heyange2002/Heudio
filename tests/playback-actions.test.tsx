@@ -35,7 +35,7 @@ async function player(mids:string[], mode='sequential', unavailable=new Set<stri
  const root=createRoot(document.getElementById('root')!);
  const settle=async()=>act(async()=>{for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));});
  await act(async()=>root.render(<App/>));
- const click=async(label:string)=>{await act(async()=>document.querySelector(`button[aria-label="${label}"]`)!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));await settle();};
+ const click=async(label:string)=>{await act(async()=>document.querySelector(`button[aria-label="${label}"]`)!.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));await settle();if(label==='暂停')await act(async()=>{await new Promise(resolve=>setTimeout(resolve,700));});};
  const saved=()=>JSON.parse(localStorage.getItem('soundisle:playback-session')!);
  return {requests,audios,unavailable,click,settle,saved,hold:(mid:string)=>{hold=mid;},release:(mid:string)=>pending?.(Response.json({data:{playUrl:{[mid]:{url:''}}}})),
   close:async()=>{await act(()=>root.unmount());page.window.close();globalThis.fetch=oldFetch;globalThis.Audio=oldAudio;}};

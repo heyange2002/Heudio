@@ -282,3 +282,66 @@ test('player controls work without searching, and invented playback IDs are reje
   }, undefined, {});
   assert.equal(result.playbackAction,'pause'); assert.equal(result.toolTrace[0].ok,false);
 });
+
+test('contextual acceptance can play the saved verified offer without searching again', async () => {
+  const playlist = { title: '刚才推荐的歌单', songs: [{ mid: 'verifiedOffer', title: '真实歌曲', artist: '歌手' }] };
+  let round = 0;
+  const result = await companionChat({ ...body, musicSource: 'qq-music', message: '听起来不错，就听它吧', pendingPlaylist: { playlist, recommendedSceneId: 'rest' } }, env, async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    assert.equal(JSON.parse(payload.messages.at(-1).content).pendingPlaylist.songs[0].mid, 'verifiedOffer');
+    if (++round === 1) return upstream(JSON.stringify({ intent: 'music', request: '播放刚才推荐的歌单', constraints: [] }));
+    return toolResult('player_control', { action: 'play' });
+  }, undefined, { search: async () => { throw Error('must reuse the offer'); } });
+  assert.equal(result.playbackAction, 'play_queue');
+  assert.deepEqual(result.playlist, playlist);
+  assert.equal(result.recommendedSceneId, 'rest');
+});
+
+test('starting an existing queue sends a real resume action without depending on the model', async () => {
+  const result = await companionChat({ ...body, musicSource: 'qq-music', message: '开始播放', currentTrack: '已选歌曲', playback: { state: 'paused' } }, {}, async () => { throw Error('must not call the model'); });
+  assert.equal(result.playbackAction, 'resume');
+  assert.equal(result.playlist, undefined);
+});
+
+test('ordinary chat returns a validated answer in one model call while music controls need none', async () => {
+  let calls = 0;
+  const result = await companionChat({ ...body, musicSource: 'qq-music', message: '今天不想听歌，只想聊聊', agentPrompt: '保持简短温柔。' }, env, async (_url, options) => {
+    calls++;
+    const payload = JSON.parse(options.body);
+    assert(payload.messages[0].content.startsWith(DEFAULT_AGENT_PROMPT));
+    assert.match(payload.messages[0].content, /保持简短温柔/);
+    assert.equal(payload.tools, undefined);
+    return upstream(JSON.stringify({ ...reply, intent: 'chat', request: '倾听，不放歌', constraints: ['不放歌'], playlist: { songs: [{ mid: 'fake' }] }, playbackAction: 'play_queue' }));
+  }, undefined, {});
+  assert.equal(calls, 1); assert.equal(result.reply, reply.reply);
+  assert.equal(result.playlist, undefined); assert.equal(result.playbackAction, undefined);
+  for (const [message, action] of [['暂停', 'pause'], ['停止播放', 'pause'], ['继续播放', 'resume'], ['下一首', 'next'], ['上一曲', 'previous']]) {
+    const control = await companionChat({ ...body, musicSource: 'qq-music', message }, {}, async () => { throw Error('must not call'); });
+    assert.equal(control.playbackAction, action);
+  }
+  const rejected = await companionChat({ ...body, musicSource: 'qq-music', message: '聊聊' }, env, async () => upstream(JSON.stringify({ ...reply, intent: 'chat', request: '交流', constraints: [], suggestedFollowUps: [null] })), undefined, {});
+  assert.equal(rejected.mode, 'local');
+});
+
+test('conversation controls expose real app operations without asking the model or searching', async () => {
+  const cases = [['清空歌单','clear_queue'],['把音量调到50%','set_volume'],['音量调到百分之五十','set_volume'],['音量降低10%','adjust_volume'],['小声一点','adjust_volume'],['静音','mute'],['取消静音','unmute'],['随机播放','set_mode'],['跳到一分三十秒','seek'],['定时十分钟','set_timer'],['取消定时','set_timer']];
+  for (const [message, action] of cases) {
+    const result = await companionChat({...body,musicSource:'qq-music',message}, {}, async()=>{throw Error('direct controls must not call model');});
+    assert.equal(result.playbackAction,action,message);
+    assert.equal(result.playerControl.action,action);
+    assert.equal(result.playlist,undefined);
+    if(message.includes('五十')||message.includes('50'))assert.equal(result.playerControl.percent,50);
+    if(message.includes('一分'))assert.equal(result.playerControl.seconds,90);
+  }
+});
+
+test('model tool batches can clear the local queue and adjust volume; malformed commands are rejected', async () => {
+  const {playerControl,directPlayerControl}=await import('../shared/player-control.mjs');
+  for(const value of [-1,101,NaN,Infinity,'50'])assert.throws(()=>playerControl({action:'set_volume',percent:value}));
+  assert.throws(()=>playerControl({action:'seek',seconds:-5}));
+  assert.throws(()=>playerControl({action:'set_mode',mode:'invented'}));
+  for(const text of ['不要清空歌单','静音是什么意思','音量调到500%','跳到一百万秒'])assert.equal(directPlayerControl(text),undefined,text);
+  const result=await companionChat({...body,intent:'playlist',message:'清空队列并把音量调到30%'},env,async()=>Response.json({choices:[{finish_reason:'tool_calls',message:{role:'assistant',tool_calls:[{action:'clear_queue'},{action:'set_volume',percent:30}].map((args,i)=>({id:'control'+i,type:'function',function:{name:'player_control',arguments:JSON.stringify(args)}}))}}]}),undefined,{});
+  assert.deepEqual(result.playerControls,[{action:'clear_queue'},{action:'set_volume',percent:30}]);
+  assert.equal(result.playlist,undefined);
+});

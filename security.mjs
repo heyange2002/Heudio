@@ -1,13 +1,16 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isMediaRequest } from './cloudflare/playback.mjs';
-import { musicIdentityCookie } from './shared/music-identity.mjs';
+import { cookieValue, MUSIC_COOKIE, MUSIC_COOKIE_SECONDS, musicIdentityCookie } from './shared/music-identity.mjs';
 import { isAccessCode } from './shared/access-code.mjs';
 
 // Authentication secrets never enter the frontend bundle. TLS handles encryption.
-export function createSecurity({ key, production = false, desktop = false, ttl = 3600000, now = Date.now }) {
-  if (!desktop && !isAccessCode(key)) throw Error('APP_ACCESS_KEY must contain exactly 4 digits');
+export function createSecurity({ key, mobileApiKey = '', production = false, desktop = false, mobile = false, ttl = 3600000, apiKeyTtl = 86400000, now = Date.now }) {
+  const apiKeyEnabled = !desktop && !!mobileApiKey;
+  if (apiKeyEnabled && !/^[\x21-\x7e]{32,256}$/.test(mobileApiKey)) throw Error('MOBILE_API_KEY must contain 32-256 printable non-space ASCII characters');
+  if (production && mobile && !apiKeyEnabled) throw Error('MOBILE_API_KEY is required for the public mobile service');
+  if (!desktop && !mobile && !isAccessCode(key)) throw Error('APP_ACCESS_KEY must contain exactly 4 digits');
   const digest = value => createHash('sha256').update(value).digest();
-  const expected = digest(desktop ? randomBytes(32) : key), sessions = new Map(), attempts = new Map();
+  const expected = digest(desktop || mobile ? randomBytes(32) : key), sessions = new Map(), attempts = new Map();
   const cookie = 'soundisle_session';
   const deny = (res, status, error) => res.status(status).json({ error });
   const tokenOf = req => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(cookie + '='))?.slice(cookie.length + 1);
@@ -27,6 +30,47 @@ export function createSecurity({ key, production = false, desktop = false, ttl =
     if (req.headers['sec-fetch-site'] === 'cross-site' || (req.headers['x-soundisle-client'] !== 'web' && !isMediaRequest(req.method, req.path))) return deny(res, 403, '请求来源无效');
     const origin = req.headers.origin;
     if (origin && origin !== `${req.protocol}://${req.get('host')}`) return deny(res, 403, '请求来源无效');
+    // These routes grant only a short-lived QR image capability, never an API session.
+    if ((req.path === '/mobile/qq-display/pair' && req.method === 'POST') ||
+        (req.path === '/mobile/qq-display/view' && req.method === 'GET')) return next();
+    if (apiKeyEnabled && req.headers['x-api-key'] !== undefined) {
+      const supplied = req.headers['x-api-key'];
+      if (typeof supplied !== 'string' || supplied.length > 256 || !timingSafeEqual(digest(supplied), digest(mobileApiKey)))
+        return deny(res, 401, 'API Key 无效，请检查连接配置');
+      let id = tokenOf(req);
+      if (!sessions.has(id)) {
+        if (sessions.size >= 1000) return deny(res, 503, '服务繁忙');
+        id = /^[a-f0-9]{64}$/.test(id || '') ? id : randomBytes(32).toString('hex');
+      }
+      sessions.set(id, now() + apiKeyTtl);
+      const parts = (req.headers.cookie || '').split(';').map(s => s.trim()).filter(s => s && !s.startsWith(cookie + '='));
+      parts.push(`${cookie}=${id}`);
+      const deviceCookie = musicIdentityCookie(parts.join('; '), req.secure);
+      req.headers.cookie = [...parts.filter(s => !s.startsWith(MUSIC_COOKIE + '=')), deviceCookie.split(';')[0]].join('; ');
+      res.setHeader('Set-Cookie', [`${cookie}=${id}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${Math.floor(apiKeyTtl / 1000)}${req.secure ? '; Secure' : ''}`, deviceCookie]);
+      if (req.path === '/auth/session' && ['GET', 'POST'].includes(req.method))
+        return res.json({ authenticated: true, apiKeyRequired: true });
+    }
+    if (mobile && !apiKeyEnabled) {
+      if (!loopback) return deny(res, 503, '请在服务端配置 MOBILE_API_KEY');
+      // Mobile service has no access lock. Cookies identify each device's QQ grant,
+      // memory and media tickets; they are not an access-code authorization barrier.
+      const incoming = req.headers.cookie || '';
+      const saved = tokenOf(req);
+      const id = /^[a-f0-9]{64}$/.test(saved || '') ? saved : randomBytes(32).toString('hex');
+      const parts = incoming.split(';').map(s => s.trim()).filter(s => s && !s.startsWith(cookie + '='));
+      parts.push(`${cookie}=${id}`);
+      const deviceCookie = musicIdentityCookie(parts.join('; '), req.secure);
+      req.headers.cookie = [...parts.filter(s => !s.startsWith(MUSIC_COOKIE + '=')), deviceCookie.split(';')[0]].join('; ');
+      if (id !== saved || !/^[a-f0-9]{64}$/.test(cookieValue(incoming, MUSIC_COOKIE) || '') || req.path === '/auth/session') {
+        res.setHeader('Set-Cookie', [`${cookie}=${id}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${MUSIC_COOKIE_SECONDS}${req.secure ? '; Secure' : ''}`, deviceCookie]);
+      }
+      if (req.path === '/auth/session') {
+        if (!['GET', 'POST', 'DELETE'].includes(req.method)) return deny(res, 405, '方法不支持');
+        return res.json({ authenticated: true, mobile: true });
+      }
+      return next();
+    }
     const id = tokenOf(req), authenticated = id && sessions.has(id);
     if (req.path === '/auth/session' && req.method === 'GET') {
       if (desktop && !authenticated) {
@@ -36,9 +80,10 @@ export function createSecurity({ key, production = false, desktop = false, ttl =
         return res.json({ authenticated: true, desktop: true });
       }
       if (authenticated) res.setHeader('Set-Cookie', musicIdentityCookie(req.headers.cookie, req.secure));
-      return res.json({ authenticated: !!authenticated, ...(desktop ? { desktop: true } : {}) });
+      return res.json({ authenticated: !!authenticated, ...(desktop ? { desktop: true } : {}), ...(apiKeyEnabled ? { apiKeyRequired: true } : {}) });
     }
     if (req.path === '/auth/session' && req.method === 'POST') {
+      if (mobile && apiKeyEnabled) return deny(res, 401, '请输入有效的 API Key');
       const ip = req.ip || req.socket.remoteAddress;
       let a = attempts.get(ip);
       if (!a) { if (attempts.size >= 10000) return deny(res, 503, '服务繁忙'); a = { count: 0, until: now() + 60000 }; attempts.set(ip, a); }

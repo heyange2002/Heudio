@@ -49,7 +49,7 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     const main = document.querySelector('main')!;
     assert.equal(main.querySelector('section[aria-label="QQ 音乐"]'),null);
     const sidebar=document.querySelector('aside[aria-label="音乐侧栏"]') as HTMLElement;
-    assert(sidebar.hidden);
+    assert.equal(sidebar.getAttribute('aria-hidden'),'true');
     assert.equal(main.querySelector('select[aria-label="QQ 音乐连接方式"]'), null);
     assert.equal(main.querySelector('input[placeholder="用于获取真实天气"]'), null);
     assert(!main.textContent?.includes('认识彼此'));
@@ -72,10 +72,10 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     assert.equal(document.querySelector('[role="dialog"]'), null);
     const expandMusic=document.querySelector('button[aria-label="展开音乐侧栏"]')!;
     await act(async()=>expandMusic.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
-    assert(!sidebar.hidden);
+    assert.equal(sidebar.getAttribute('aria-hidden'),'false');
     const recommend = [...document.querySelectorAll('button')].find(b => b.textContent === '让阿屿为此刻编排')!;
     await act(async () => recommend.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true })));
-    assert(sidebar.hidden);
+    assert.equal(sidebar.getAttribute('aria-hidden'),'true');
     assert.deepEqual(steps, ['model:start']); assert.equal(voiceText, '');
     const reply = '忙了一天，先陪你慢下来。这几首歌，留给此刻的你。';
     await act(async () => {
@@ -91,6 +91,7 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     assert(!document.body.textContent?.includes('换一首试试'));
     const speakReply=()=>[...document.querySelectorAll('button[aria-label="语音朗读陪伴"]')].at(-1)!;
     const firstMusic = audios.find(a=>!a.src.startsWith('blob:'));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
     assert.equal(firstMusic.volume, 0.05);
     await act(async () => { firstMusic.currentTime = 89; firstMusic.ontimeupdate(); });
     assert(!steps.includes('music:request:song456'));
@@ -101,6 +102,7 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     // A playlist continues automatically, even while the companion is speaking.
     await act(async()=>firstMusic.onended());
     const secondMusic = audios.filter(a=>!a.src.startsWith('blob:')).at(-1);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
     assert.equal(secondMusic, bufferedMusic);
     assert.equal(steps.filter(step => step === 'music:request:song456').length, 1);
     assert(steps.includes('music:request:song456')); assert.equal(secondMusic.volume, 0.05);
@@ -160,8 +162,8 @@ test('playlist action plays real songs and MiniMax speech, persists the Agent pr
     await act(async()=>refreshedRecommend.dispatchEvent(new page.window.MouseEvent('click',{bubbles:true})));
     await act(async()=>finishModel(Response.json({reply:'假装编好了',mode:'model'})));
     assert(document.body.textContent?.includes('这次没有找到合适的歌曲'));
-    assert.equal(steps.filter(s=>s==='speech:start').length,synthesisCount+1);
-    assert.match(voiceText,/这次没有找到合适的歌曲/);
+    assert.equal(steps.filter(s=>s==='speech:start').length,synthesisCount);
+    assert(!document.querySelector('[role="log"]')!.textContent?.includes('这次没有找到合适的歌曲'));
     assert(!document.body.textContent?.includes('假装编好了'));
     assert.equal(document.querySelector('section[aria-label="播放队列"] button[aria-current="true"]')?.getAttribute('aria-label'),'播放 一首歌 · 歌手');
     // Offering and enqueuing a new playlist must preserve the current song.

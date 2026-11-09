@@ -1,5 +1,25 @@
 // City is explicitly supplied by the user; no implicit location tracking.
 const cache = new Map();
+const refreshes = new Map();
+
+// Weather is optional chat context. A cold or unavailable weather provider must
+// not hold up the user's conversation; the dedicated endpoint still awaits it.
+export function chatWeather(city, fetchImpl = fetch, defer = promise => { void promise.catch(() => {}); }) {
+  if (typeof city !== 'string' || !city.trim() || city.length > 80) return { available: false, summary: '未设置城市，天气未知' };
+  const key = city.trim(), cached = cache.get(key);
+  if (cached?.until > Date.now()) return cached.data;
+  if (!refreshes.has(key)) {
+    const job = getWeather(key, fetchImpl).then(data => {
+      if (!data.available) {
+        if (cache.size > 100) cache.clear();
+        cache.set(key, { data, until: Date.now() + 30000 });
+      }
+    }).finally(() => refreshes.delete(key));
+    refreshes.set(key, job);
+  }
+  defer(refreshes.get(key));
+  return { available: false, summary: '天气暂时不可用' };
+}
 export async function getWeather(city, fetchImpl = fetch) {
   if (typeof city !== 'string' || !city.trim() || city.length > 80) return { available: false, summary: '未设置城市，天气未知' };
   const key = city.trim();

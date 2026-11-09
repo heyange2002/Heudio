@@ -1,7 +1,7 @@
 {
   "name": "soundisle-pc",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.11",
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/patch-qq-music-api.mjs",
@@ -30,7 +30,17 @@
     "pc:dist": "npm run build:pc && electron-builder",
     "test:desktop": "npm run build:pc && electron . --smoke-test",
     "test:settings": "node --test tests/local-provider-settings.test.mjs",
-    "test:memory": "node --test tests/agent-memory.test.mjs"
+    "test:memory": "node --test tests/agent-memory.test.mjs",
+    "mobile:dev": "node scripts/start-mobile.mjs",
+    "mobile:build": "vite build --config vite.mobile.config.ts",
+    "mobile:web:build": "vite build --config vite.mobile.config.ts --base /mobile/ --outDir ../dist-mobile-web",
+    "mobile:preview": "vite preview --config vite.mobile.config.ts --host 127.0.0.1 --port 5174",
+    "mobile:start": "NODE_ENV=production node scripts/start-mobile.mjs",
+    "android:sync": "npm run mobile:build && node scripts/prepare-android.mjs",
+    "android:debug": "npm run android:sync && node scripts/build-android.mjs",
+    "test:mobile": "node tests/run-mobile.mjs",
+    "test:android": "node scripts/build-android.mjs --test",
+    "android:verify": "npm run android:sync && node scripts/build-android.mjs --verify"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -1,0 +1,26 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.soundisle.mobile'
+    compileSdk 36
+    buildToolsVersion '36.1.0'
+    defaultConfig { applicationId 'com.soundisle.mobile'; minSdk 29; targetSdk 36; versionCode 12; versionName '0.2.9' }
+    buildFeatures { buildConfig true }
+    buildTypes { release { minifyEnabled false } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    testOptions { unitTests.includeAndroidResources = true }
+}
+dependencies {
+    implementation 'androidx.activity:activity:1.11.0'
+    implementation 'androidx.media3:media3-exoplayer:1.9.4'
+    implementation 'androidx.media3:media3-session:1.9.4'
+    implementation 'androidx.media3:media3-datasource-okhttp:1.9.4'
+    implementation 'androidx.webkit:webkit:1.15.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.17'
+}
+tasks.withType(Test).configureEach {
+    systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+    ['https.proxyHost','https.proxyPort','http.proxyHost','http.proxyPort','http.nonProxyHosts'].each { name ->
+        if (System.getProperty(name)) systemProperty name, System.getProperty(name)
+    }
+}

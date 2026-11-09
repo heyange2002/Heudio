@@ -13,6 +13,7 @@ import {LyricsView, type LyricStyle} from '../src/components/LyricsView';
 import {normalizeLyricStyle, LYRIC_STYLES} from '../src/components/lyrics/styles';
 import {LyricsModal} from '../src/components/LyricsModal';
 import AccessGate from '../src/AccessGate';
+import {AppNotifications} from '../src/components/AppNotifications';
 import {AgentMemorySettings} from '../src/components/AgentMemorySettings';
 import type {ServiceSettings} from '../src/types/music';
 import {DEFAULT_SPEECH} from '../shared/speech.mjs';
@@ -141,6 +142,8 @@ test('conversation follows the newest message, loading row and resized content i
   assert.equal(log.scrollTop,1500);assert(log.textContent?.includes('最后一条消息'));
   log.scrollTop=0;height=1600;
   await act(()=>root.render(<AgentCompanion {...props} isLoading/>));assert.equal(log.scrollTop,1600);
+  const progress=document.querySelector('.agent-response-progress')!;
+  assert(!log.contains(progress));assert.equal(progress.nextElementSibling?.tagName,'FORM');
   log.scrollTop=0;height=1700;onResize();assert.equal(log.scrollTop,1700);
  }finally{await act(()=>root.unmount());page.window.close();globalThis.ResizeObserver=oldObserver;}
  assert(disconnected);
@@ -209,7 +212,7 @@ test('playlist list plays a whole playlist with one click, appends all results, 
   const path=String(url);paths.push(path);
   if(failLaterPage && path.includes('offset='))return Response.json({error:'后续页读取失败'},{status:502});
   if(path.endsWith('/login/status'))return Response.json({data:{}});
-  if(path.endsWith('/user/playlist'))return Response.json({playlist:[{tid:'123',title:'长歌单'},{tid:'empty',title:'空歌单'},{tid:'failed',title:'离线歌单'},{dirid:0,title:'喜欢收藏'}]});
+  if(path.endsWith('/user/playlist'))return Response.json({playlist:[{tid:'123',name:'长歌单'},{tid:'empty',title:'空歌单'},{tid:'failed',title:'离线歌单'},{dirId:0,dirName:'喜欢收藏'}]});
   if(path.includes('failed'))return Response.json({error:'连接失败'},{status:502});
   if(path.includes('empty'))return Response.json({songs:[]});
   const offset=Number(new URL(path,'https://soundisle.test').searchParams.get('offset') || 0);
@@ -262,4 +265,17 @@ test('new lyric scenes keep current line and seek targets correct without transl
    await render(0,[{timeSec:0,text:'单句测试',translation:'Single line'}]);assert.equal(document.querySelectorAll('[aria-current="true"]').length,1);
   }
  } finally {await act(()=>root.unmount());page.window.close();}
+});
+
+test('error notifications disappear after two seconds and a newer error receives its full lifetime', async()=>{
+ const {page,root}=dom();
+ const wait=(ms:number)=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,ms));});
+ try{
+  await act(()=>root.render(<AppNotifications agentError="第一条错误"/>));assert.match(document.querySelector('[role="alert"]')!.textContent!,/第一条错误/);
+  await wait(1000);
+  await act(()=>root.render(<AppNotifications agentError="第二条错误"/>));
+  await wait(1200);assert.match(document.querySelector('[role="alert"]')!.textContent!,/第二条错误/);
+  await wait(1100);assert.equal(document.querySelector('[role="alert"]'),null);
+  await act(()=>root.render(<AppNotifications agentError="第二条错误"/>));assert.equal(document.querySelector('[role="alert"]'),null);
+ }finally{await act(()=>root.unmount());page.window.close();}
 });

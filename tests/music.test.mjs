@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMusicClient, musicRoute, normalizeSongs, validateMusicConfig } from '../cloudflare/music.mjs';
-import { getWeather } from '../cloudflare/context.mjs';
+import { getWeather, chatWeather } from '../cloudflare/context.mjs';
 const request = (path = '', cookie = 'user-a') => new Request('https://soundisle.test/api/music' + path, { headers: { Cookie: 'soundisle_session=' + cookie } });
 function store() { const map = new Map(); return { map, get: async k => map.get(k), put: async (k,v) => { map.set(k,v); }, delete: async k => map.delete(k) }; }
 const song = { mid: 'realMid123', title: '真实歌曲', singer: [{ name: '歌手' }], album: { mid: 'album123', name: '专辑' }, interval: 120 };
@@ -152,4 +152,26 @@ test('playlist normalization retains the entire catalog beyond the old 30-song c
  const songs = Array.from({length:120},(_,i)=>({...song,mid:'full'+i}));
  const result=normalizeSongs({cdlist:[{songlist:[...songs,songs[0],null,{mid:'../bad'}]}]});
  assert.equal(result.length,120);assert.equal(result.at(-1).mid,'full119');
+});
+
+test('chat weather returns immediately, coalesces cold refreshes and reuses the result', async () => {
+  const jobs = []; let finish, calls = 0;
+  const provider = async url => {
+    calls++;
+    if (url.includes('geocoding')) return new Promise(resolve => { finish = resolve; });
+    return Response.json({ current: { temperature_2m: 20, weather_code: 0 } });
+  };
+  const cold = chatWeather('chat-weather-cold', provider, job => jobs.push(job));
+  assert.equal(cold.available, false);
+  assert.equal(chatWeather('chat-weather-cold', provider, job => jobs.push(job)).available, false);
+  assert.equal(calls, 1);
+  finish(Response.json({ results: [{ name: '测试市', latitude: 31, longitude: 121 }] }));
+  await Promise.all(jobs);
+  const warm = chatWeather('chat-weather-cold', provider);
+  assert.match(warm.summary, /测试市 · 晴 20/); assert.equal(calls, 2);
+  const failures = []; let failedCalls = 0;
+  chatWeather('chat-weather-failed', async () => { failedCalls++; throw Error('offline'); }, job => failures.push(job));
+  await Promise.all(failures);
+  assert.equal(chatWeather('chat-weather-failed', async () => { failedCalls++; }).available, false);
+  assert.equal(failedCalls, 1);
 });

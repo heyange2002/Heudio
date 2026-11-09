@@ -3,6 +3,8 @@ import { AgentMessage, SceneMode } from '../types/music';
 import { Send, Volume2, RefreshCw, Square, LoaderCircle, Play, Mic, X } from 'lucide-react';
 import type { SpeechState } from '../utils/speechPlayer';
 import { VoiceInput, type VoiceInputState } from '../utils/voiceInput';
+import { CompanionContext } from './CompanionContext';
+import { notifyError } from './AppNotifications';
 
 interface AgentCompanionProps {
   messages: AgentMessage[];
@@ -13,6 +15,9 @@ interface AgentCompanionProps {
   currentScene: SceneMode;
   weatherText: string;
   timeContextText: string;
+  city?: string;
+  workState?: string;
+  motionEnabled?: boolean;
   onSpeakMessage?: (text: string) => void;
   speechState?: SpeechState;
   onStopSpeech?: () => void;
@@ -28,6 +33,9 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
   currentScene,
   weatherText,
   timeContextText,
+  city,
+  workState,
+  motionEnabled = true,
   onSpeakMessage,
   speechState,
   onStopSpeech,
@@ -43,6 +51,7 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
     if(!latest.current.isLoading){latest.current.onSendMessage(message);setInputText('');}
   }),[]);
   const recording=voiceInput.status==='recording';
+  useEffect(() => { if (voiceInput.error) notifyError(voiceInput.error); }, [voiceInput.error]);
   const voiceBusy=['requesting','recording','processing'].includes(voiceInput.status);
   const messageListRef = useRef<HTMLDivElement>(null);
   const messageContentRef = useRef<HTMLDivElement>(null);
@@ -72,18 +81,14 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
   return (
     <div className="w-full rounded-2xl border border-stone-800/80 bg-stone-900/60 backdrop-blur-md p-5 flex flex-col h-[min(580px,calc(100dvh-15rem))] min-h-[360px] md:h-auto md:min-h-0 md:flex-1">
       {/* Header with context indicators */}
-      <div className="flex flex-col gap-2 pb-3 mb-3 border-b border-stone-800/60 text-xs text-stone-400">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="agent-context-header pb-3 mb-3 border-b border-stone-800/60 text-xs text-stone-400">
+        <div className="agent-identity">
           <span className="w-2 h-2 rounded-full bg-amber-400" />
           <span className="font-semibold text-stone-200">阿屿 · 你的音乐陪伴者</span>
           <span aria-hidden="true">·</span>
           <span>听你说，为你选歌</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-stone-400 text-[11px]">
-          <span>{weatherText}</span>
-          <span aria-hidden="true">/</span>
-          <span>{timeContextText}</span>
-        </div>
+        <CompanionContext weatherText={weatherText} timeContextText={timeContextText} city={city} workState={workState}/>
       </div>
 
       {/* Messages Stream */}
@@ -143,27 +148,27 @@ export const AgentCompanion: React.FC<AgentCompanionProps> = ({
           );
         })}
 
-        {isLoading && (
-          <div className="flex items-center gap-2 text-xs text-stone-400 p-3 bg-stone-800/40 rounded-xl max-w-xs animate-pulse">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
-            <span>声屿正在体会你的心境并构筑音乐声景...</span>
-          </div>
-        )}
         </div>
       </div>
 
-      {speechState && speechState.status !== 'idle' && (
+      {speechState && speechState.status !== 'idle' && !speechState.error && (
         <div role="status" aria-live="polite" className="flex items-center justify-between gap-2 mt-2 text-xs text-stone-400">
-          <span>{speechState.error || (speechState.status === 'loading' ? '正在生成 MiniMax 语音…' : 'MiniMax 正在朗读 · AI 合成声音')}</span>
+          <span className="flex items-center gap-2">{!speechState.error && <span className={`speech-activity ${motionEnabled && (speechState.status === 'playing' || speechState.status === 'loading') ? 'is-active' : ''}`} aria-hidden="true"><i/><i/><i/><i/><i/></span>}{speechState.error?.replace(/MiniMax/gi, '语音服务') || '阿屿在这里，轻声陪你'}</span>
           {(speechState.status === 'playing' || speechState.status === 'loading' || speechState.status === 'ready') && <button type="button" onClick={onStopSpeech} className="shrink-0 text-amber-300">{speechState.status === 'loading' ? '取消' : '停止'}</button>}
         </div>
       )}
 
       {/* Input Box */}
-      {voiceBusy || voiceInput.error ? <div role="status" aria-live="polite" className="flex items-center gap-2 mt-2 text-xs text-amber-200">
+      {voiceBusy ? <div role="status" aria-live="polite" className="flex items-center gap-2 mt-2 text-xs text-amber-200">
         <span className="flex-1">{voiceInput.error || (recording?'正在听你说 · 再点麦克风结束并发送（最长60秒）':voiceInput.status==='requesting'?'正在请求麦克风权限…':'正在识别你说的话…')}</span>
         {voiceBusy&&<button type="button" aria-label="取消语音输入" className="p-1 text-stone-400" onClick={()=>recorder.cancel()}><X className="h-4 w-4"/></button>}
       </div> : null}
+      {isLoading && (
+        <div role="status" aria-live="polite" className="agent-response-progress shrink-0 flex items-center gap-2 mt-2 text-xs text-stone-400 p-3 bg-stone-800/40 rounded-xl animate-pulse">
+          <RefreshCw aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin text-amber-400" />
+          <span>声屿正在体会你的心境并构筑音乐声景...</span>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-2">
         <input
           type="text"

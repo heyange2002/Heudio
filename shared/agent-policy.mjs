@@ -82,6 +82,20 @@ export function normalizeAgentPrompt(value) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, MAX_AGENT_PROMPT_LENGTH) : DEFAULT_AGENT_PROMPT;
 }
 
+// Only unambiguous acceptance may consume a previously offered playlist.
+export function isPlayConfirmation(message) {
+  const text = String(message || '').trim().replace(/[\s，。！!,.？?、]/g, '');
+  return /^(?:(?:好|好的|好啊|可以|行|嗯|那就|请|帮我|给我)[呀啊吧的]?)?(?:(?:现在|立即|直接)?(?:开始)?播放(?:(?:这个|这张|刚才的|推荐的)?歌单)?[吧呀啊]?|(?:开始|放|听|听听)吧|(?:现在|开始)听|就听这个)$/.test(text);
+}
+
+export function playbackControlHint(message) {
+  const text = String(message || '').trim().replace(/[\s，。！!,.]/g, '');
+  if (/^(?:请|帮我)?(?:暂停|停止)(?:播放|音乐)?(?:吧)?$/.test(text)) return 'pause';
+  if (/^(?:请|帮我)?(?:继续|恢复)(?:播放)?(?:吧)?$/.test(text)) return 'resume';
+  if (/^(?:请|帮我)?(?:切到|播放|换到)?下(?:一)?(?:首|曲)(?:吧)?$/.test(text)) return 'next';
+  if (/^(?:请|帮我)?(?:切到|播放|换到)?上(?:一)?(?:首|曲)(?:吧)?$/.test(text)) return 'previous';
+}
+
 // Clear commands stay deterministic; ambiguous, contextual messages go to the intent model.
 export function musicIntentHint(message) {
   const text=String(message||'').trim().toLowerCase();
