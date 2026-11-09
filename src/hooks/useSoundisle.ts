@@ -19,6 +19,7 @@ import { PlaybackOrder, normalizePlaybackMode, nextPlaybackMode } from '../utils
 import { PLAYBACK_SESSION_KEY, DEFAULT_QUEUE_TITLE, restorePlaybackSession, trackSong } from '../utils/playbackSession';
 import type { LyricStyle } from '../components/LyricsView';
 import { normalizeLyricStyle } from '../components/lyrics/styles';
+import { PLAYER_ACTIONS, playerControl } from '../../shared/player-control.mjs';
 export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emptyMusicMessage = '请先让阿屿选歌，或在音乐侧栏选择一首 QQ 音乐。') {
   const [restored] = useState(() => restorePlaybackSession(readLocal(PLAYBACK_SESSION_KEY, null)));
   const [tracks, setTracks] = useState<MusicTrack[]>(restored.tracks);
@@ -107,6 +108,7 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
   const [queueTitle, setQueueTitle] = useState(restored.title);
   const [musicError, setMusicError] = useState('');
   const [agentStatus, setAgentStatus] = useState('');
+  const [agentError, setAgentError] = useState('');
   const chatController = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController(), revision = conversationRevision.current;
@@ -242,6 +244,7 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
   // Handle sleep timer countdown
   const timerIntervalRef = useRef<number | null>(null);
   const volumeRef = useRef(volume);
+  const audibleVolume = useRef(volume);
   volumeRef.current = volume;
   useEffect(() => {
     if (audioEngine.isNative) {
@@ -282,7 +285,7 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
   const handleTogglePlay = () => {
     if (audioEngine.isNative && !nativeReady) { setMusicError('正在连接播放器，请稍候再试'); return; }
     if (isPlaying) {
-      audioEngine.pause();
+      if (audioEngine.isNative) audioEngine.pause(); else audioEngine.pause(650);
       setIsPlaying(false);
     } else {
       if(settings.musicSource==='qq-music'&&!currentTrack.qqMid){setMusicError(emptyMusicMessage);return;}
@@ -314,6 +317,8 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
   };
 
   const handleVolumeChange = (vol: number) => {
+    volumeRef.current = vol;
+    if (vol > 0) audibleVolume.current = vol;
     setVolume(vol);
     audioEngine.setMasterVolume(vol);
   };
@@ -378,6 +383,7 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
   // Agent message handling via server API with fallback
   const handleSendMessage = async (text: string, musicSource = 'qq-music', intent: 'chat' | 'playlist' = 'chat') => {
     if (chatController.current) return;
+    setAgentError('');
     conversationRevision.current++;
     const wantsMusic = intent==='playlist'||musicIntentHint(text)==='music';
     if(wantsMusic&&!currentTrack.qqMid){audioEngine.pause();setIsPlaying(false);}
@@ -403,6 +409,7 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
           message: text,
           sessionId: agentSessionId,
           playback: { state: musicError ? 'error' : isPlaying ? (playbackConfirmed ? 'playing' : 'loading') : currentTrack.qqMid ? 'paused' : 'idle', error: musicError },
+          player: { volumePercent: Math.round(volumeRef.current * 100), position: currentTime, duration: currentTrack.duration, mode: settings.playbackMode, timerMinutes: settings.sleepTimerMinutes || 0 },
           profile, musicSource, listeningHistory, intent, agentPrompt: normalizeAgentPrompt(agentPrompt),
           currentQueue: qqQueue.map(song=>({title:song.title,artist:song.artist})),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -426,20 +433,44 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
       }
 
       if (controller.signal.aborted) return;
-      if (resultData.playlistError || (wantsMusic && !resultData.playlist?.songs?.length && !['pause','resume','next','previous'].includes(resultData.playbackAction))) throw Error(resultData.playlistError || '这次没有找到合适的歌曲，请检查 QQ 音乐连接或稍后重试。');
+      if (resultData.mode === 'local' && settings.chatModel !== 'local-heuristic') throw Error(resultData.fallbackReason || '暂时无法连接阿屿，请稍后再试。');
+      const rawControls = resultData.playerControls ?? (PLAYER_ACTIONS.includes(resultData.playbackAction) ? [resultData.playerControl || { action: resultData.playbackAction }] : []);
+      if (!Array.isArray(rawControls) || rawControls.length > 16) throw Error('播放器操作格式无效，请重试。');
+      const controls: any[] = rawControls.map(value => playerControl(value).playerControl);
+      if (resultData.playlistError || (wantsMusic && !resultData.playlist?.songs?.length && !controls.length)) throw Error(resultData.playlistError || '这次没有找到合适的歌曲，请检查 QQ 音乐连接或稍后重试。');
       setAgentStatus(resultData.mode === 'local' || !response.ok ? (resultData.fallbackReason || '当前为规则回复，尚未连接陪伴模型') : resultData.playbackAction === 'offer_queue' ? '歌单已准备好' : resultData.playlist ? '正在开始播放…' : '阿屿 · MiniMax M3');
       if (resultData.memoryStatus === 'unavailable') setAgentStatus('本次记忆未能保存，音乐与对话仍可继续');
+      if (resultData.memoryStatus === 'unavailable') setAgentError('本次记忆未能保存，音乐与对话仍可继续');
       if (resultData.playlist?.songs?.length && resultData.playbackAction !== 'offer_queue') {
         agentPlaybackPending.current = true;
         installQueue(resultData.playlist.songs, resultData.playlist.title, resultData.recommendedSceneId, true, resultData.fadeMs || 0);
       }
-      if (resultData.playbackAction === 'pause') { audioEngine.pause(); setIsPlaying(false); setAgentStatus('音乐已暂停'); }
-      if (resultData.playbackAction === 'resume') {
-        if (currentTrack.qqMid) { agentPlaybackPending.current = true; audioEngine.playTrack(currentTrack, currentTime); setIsPlaying(true); setPlaybackConfirmed(false); setAgentStatus('正在继续播放…'); }
-        else setAgentStatus('当前没有可播放的歌曲，请先选歌');
+      const reports: string[] = [];
+      let position = resultData.playlist?.songs?.length && resultData.playbackAction !== 'offer_queue' ? 0 : currentTime;
+      for (const command of controls) {
+        const cursor = playbackCursor.current, selected = cursor.tracks[cursor.index];
+        if (command.action === 'clear_queue') { clearQueue(); position = 0; reports.push('当前播放列表已清空'); }
+        if (['set_volume','adjust_volume','mute','unmute'].includes(command.action)) {
+          const target = command.action === 'mute' ? 0 : command.action === 'unmute' ? volumeRef.current || audibleVolume.current : command.action === 'set_volume' ? command.percent / 100 : volumeRef.current + command.delta / 100;
+          handleVolumeChange(Math.max(0, Math.min(1, target)));
+          reports.push(command.action === 'mute' ? '音乐已静音' : `音乐音量已调到 ${Math.round(volumeRef.current * 100)}%`);
+        }
+        if (command.action === 'set_mode') {
+          setSettings(prev => ({ ...prev, playbackMode: command.mode }));
+          playbackCursor.current = { ...cursor, mode: command.mode };
+          if (audioEngine.isNative) audioEngine.syncQueue(cursor.tracks, queueTitle, selected?.qqMid, position, command.mode);
+          reports.push(command.mode === 'sequential' ? '已切换顺序播放' : command.mode === 'shuffle' ? '已切换随机播放' : '已切换单曲循环');
+        }
+        if (command.action === 'set_timer') { setSettings(prev => ({ ...prev, sleepTimerMinutes: command.minutes || null })); reports.push(command.minutes ? `将在 ${command.minutes} 分钟后停止播放` : '睡眠定时已取消'); }
+        if (command.action === 'pause') { if (audioEngine.isNative) audioEngine.pause(); else audioEngine.pause(650); setIsPlaying(false); reports.push('音乐已暂停'); }
+        if (['resume','next','previous','seek'].includes(command.action)) {
+          if (!selected?.qqMid) throw Error('当前没有可播放的歌曲，请先选歌');
+          if (command.action === 'resume') { agentPlaybackPending.current = true; audioEngine.playTrack(selected, position); setIsPlaying(true); setPlaybackConfirmed(false); reports.push('准备继续播放'); }
+          if (command.action === 'next' || command.action === 'previous') { agentPlaybackPending.current = true; position = 0; if (command.action === 'next') handleNext(); else handlePrev(); reports.push(command.action === 'next' ? '准备切到下一首' : '准备回到上一首'); }
+          if (command.action === 'seek') { position = Math.max(0, Math.min(selected.duration, command.seconds)); handleSeek(position); reports.push(`播放进度已跳到 ${Math.floor(position / 60)} 分 ${Math.floor(position % 60)} 秒`); }
+        }
       }
-      if (resultData.playbackAction === 'next') { agentPlaybackPending.current = tracks.some(track => track.qqMid); handleNext(); }
-      if (resultData.playbackAction === 'previous') { agentPlaybackPending.current = tracks.some(track => track.qqMid); handlePrev(); }
+      if (reports.length) { const report = reports.join('；'); setAgentStatus(report); resultData.reply = resultData.playlist ? resultData.reply + '\n' + report : report; }
       const agentMsg: AgentMessage = {
         id: String(Date.now() + 1),
         role: 'agent',
@@ -463,8 +494,7 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
       if (controller.signal.aborted) return;
       const error = e instanceof Error ? e.message : '这次没能完成请求，请稍后重试。';
       setAgentStatus(error);
-      setMessages(prev => [...prev, { id: String(Date.now() + 1), role: 'agent', content: error, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } as AgentMessage].slice(-MEMORY_LIMITS.messages));
-      autoSpeak(error);
+      setAgentError(error);
     } finally {
       if (!controller.signal.aborted) setIsLoadingAgent(false);
       if (chatController.current === controller) chatController.current = null;
@@ -480,5 +510,5 @@ export function useSoundisle(initialSettings: Partial<ServiceSettings> = {}, emp
     void speechPlayer.speak(text, settings);
   };
 
-  return { nativeEqSupported,nativeReady,tracks,currentTrackIndex,currentTrack,currentTime,currentScene,volume,isPlaying,playbackConfirmed,settings,setSettings,equalizer,setEqualizer,isEqualizerOpen,setIsEqualizerOpen,isSettingsOpen,setIsSettingsOpen,isMusicOpen,setIsMusicOpen,isLyricsOpen,setIsLyricsOpen,lyricStyle,setLyricStyle,agentPrompt,setAgentPrompt,speechState,speechPlayer,messages,setMessages,isLoadingAgent,agentSessionId,setAgentSessionId,conversationRevision,agentPlaybackPending,profile,setProfile,listeningHistory,setListeningHistory,qqQueue,queueTitle,musicError,agentStatus,setAgentStatus,weatherText,timeContextText,view,handleTogglePlay,handleNext,handlePrev,handleSeek,handleVolumeChange,handleSelectScene,clearQueue,appendQueue,playQQSong,installQueue,handleSendMessage,handleSpeak };
+  return { nativeEqSupported,nativeReady,tracks,currentTrackIndex,currentTrack,currentTime,currentScene,volume,isPlaying,playbackConfirmed,settings,setSettings,equalizer,setEqualizer,isEqualizerOpen,setIsEqualizerOpen,isSettingsOpen,setIsSettingsOpen,isMusicOpen,setIsMusicOpen,isLyricsOpen,setIsLyricsOpen,lyricStyle,setLyricStyle,agentPrompt,setAgentPrompt,speechState,speechPlayer,messages,setMessages,isLoadingAgent,agentSessionId,setAgentSessionId,conversationRevision,agentPlaybackPending,profile,setProfile,listeningHistory,setListeningHistory,qqQueue,queueTitle,musicError,agentStatus,agentError,setAgentStatus,weatherText,timeContextText,view,handleTogglePlay,handleNext,handlePrev,handleSeek,handleVolumeChange,handleSelectScene,clearQueue,appendQueue,playQQSong,installQueue,handleSendMessage,handleSpeak };
 }

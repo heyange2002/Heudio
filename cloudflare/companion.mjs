@@ -2,6 +2,7 @@ import { recommendByMood, boundedCount } from '../shared/music-discovery.mjs';
 import { heuristicAnalysis } from './heuristic.mjs';
 import { DEFAULT_AGENT_PROMPT, normalizeAgentPrompt, musicIntentHint, isPlayConfirmation, playbackControlHint } from '../shared/agent-policy.mjs';
 import { boundedHistory, MEMORY_LIMITS } from '../shared/agent-memory.mjs';
+import { PLAYER_ACTIONS, playerControl, directPlayerControl } from '../shared/player-control.mjs';
 export const COMPANION_MODEL = 'MiniMax-M3';
 export const companionConfig = env => ({ provider: 'minimax', model: COMPANION_MODEL, configured: !!env.MINIMAX_API_KEY?.trim() });
 const scenes = ['focus','rest','workout','sleep'];
@@ -26,7 +27,7 @@ const tools = [
   tool('search_online_tracks', '按自然语言关键词检索授权在线曲库，返回真实MID及可用元数据；播放权以实际取流为准', { query: { type: 'string', maxLength: 60 }, limit: { type: 'integer', minimum: 1, maximum: 15 } }, ['query']),
   tool('get_recommendations_by_mood', '按情绪和场景映射关键词检索真实曲库（当前为标签/关键词检索，无向量索引）', { mood: { type: 'string', maxLength: 60 }, style: { type: 'string', maxLength: 60 }, scene: { type: 'string', maxLength: 60 }, count: { type: 'integer', minimum: 1, maximum: 15 } }, ['mood']),
   tool('create_temporary_playlist', '从本轮真实MID创建临时歌单卡片，默认不改变播放，用户可选播放歌单或追加到当前歌单', { title: { type: 'string' }, track_ids: { type: 'array', items: { type: 'string' } }, reply: { type: 'string', maxLength: 300 }, scene: { type: 'string', enum: scenes } }, ['title', 'track_ids']),
-  tool('player_control', '交给客户端控制播放，执行状态以客户端反馈为准；play播放本轮歌单或真实track_id，不接受模型提供URL', { action: { type: 'string', enum: ['play', 'pause', 'resume', 'next', 'previous'] }, track_id: { type: 'string' }, fade_ms: { type: 'integer', minimum: 0, maximum: 2000 } }, ['action']),
+  tool('player_control', '控制本App播放器：播放/暂停/切歌、清空当前队列（不删除QQ账号歌单）、设置音量百分比或增减百分比、静音/取消静音、播放模式、跳转进度秒数、睡眠定时分钟数（0取消）。不需要搜索歌曲；执行结果以客户端为准。play只使用已验证歌单/MID，不接受URL。', { action: { type: 'string', enum: ['play', ...PLAYER_ACTIONS] }, track_id: { type: 'string' }, fade_ms: { type: 'integer', minimum: 0, maximum: 2000 }, percent: { type: 'number', minimum: 0, maximum: 100 }, delta: { type: 'number', minimum: -100, maximum: 100 }, mode: { type: 'string', enum: ['sequential', 'shuffle', 'repeat-one'] }, seconds: { type: 'number', minimum: 0, maximum: 86400 }, minutes: { type: 'number', minimum: 0, maximum: 1440 } }, ['action']),
   tool('search_music','根据歌名、歌手或风格搜索QQ音乐，返回真实歌曲', { keyword: { type: 'string', maxLength: 60 } }, ['keyword']),
   tool('daily_music','读取已授权用户的QQ音乐每日推荐'),
   tool('liked_music','读取已授权用户喜欢的歌曲，了解音乐口味'),
@@ -53,9 +54,11 @@ export async function readResult(response) {
 export async function companionChat(body, env, fetchImpl = fetch, signal, music) {
   const scene = scenes.includes(body.currentScene) ? body.currentScene : 'focus';
   const qqMode = body.musicSource === 'qq-music';
+  const direct = qqMode && directPlayerControl(body.message);
+  if (direct) return direct;
   const control = qqMode && playbackControlHint(body.message);
   if (control) return { reply: { pause: '准备暂停音乐。', resume: '准备继续播放。', next: '准备切到下一首。', previous: '准备回到上一首。' }[control], playbackAction: control, mode: 'control' };
-  if (qqMode && !body.pendingPlaylist && body.currentTrack && isPlayConfirmation(body.message)) {
+  if (qqMode && !body.pendingPlaylist && isPlayConfirmation(body.message)) {
     return { reply: '准备继续播放当前歌曲。', playbackAction: 'resume', mode: 'control' };
   }
   let playlistIntent = body.intent === 'playlist' || (qqMode && musicIntentHint(body.message) === 'music');
@@ -95,6 +98,7 @@ export async function companionChat(body, env, fetchImpl = fetch, signal, music)
       listeningHistory: Array.isArray(body.listeningHistory) ? body.listeningHistory.slice(-15).map(t => ({ title: String(t?.title || '').slice(0,100), artist: String(t?.artist || '').slice(0,100) })) : [],
       currentQueue: Array.isArray(body.currentQueue) ? body.currentQueue.slice(0,15).map(t=>({title:String(t?.title||'').slice(0,100),artist:String(t?.artist||'').slice(0,100)})) : [],
       pendingPlaylist: body.pendingPlaylist?.playlist ? { title: body.pendingPlaylist.playlist.title, songs: body.pendingPlaylist.playlist.songs.map(song => ({ mid: song.mid, title: song.title, artist: song.artist })) } : undefined,
+      player: body.player && typeof body.player === 'object' ? { volumePercent: body.player.volumePercent, position: body.player.position, duration: body.player.duration, mode: body.player.mode, timerMinutes: body.player.timerMinutes } : undefined,
       musicAvailable: !!music, intent: playlistIntent ? 'playlist' : 'auto',
     };
     let plan;
@@ -103,7 +107,7 @@ export async function companionChat(body, env, fetchImpl = fetch, signal, music)
         method:'POST',redirect:'manual',signal:controller.signal,
         headers:{Authorization:`Bearer ${env.MINIMAX_API_KEY.trim()}`,'Content-Type':'application/json'},
         body:JSON.stringify({model:COMPANION_MODEL,stream:false,thinking:{type:'disabled'},max_completion_tokens:700,messages:[
-          {role:'system',content:COMPANION_PERSONA + `\n本轮合并意图判断与普通对话回复，只输出JSON。包含intent(music或chat)、request(结合最近对话整理的本次要求，保留否定和限制，不解释推理)、constraints(明确的歌手、曲名、风格、情绪、语言等限制字符串数组)。点歌、换歌、编排歌单、要求听喜欢的歌或每日推荐属于music；暂停、继续播放、上一首、下一首属于music（播放控制）；正在听歌时表达失恋等情绪变化且未拒绝音乐，可判music并温柔换歌；明确不想听歌、只想倾诉、询问歌曲知识属于chat。涉及自伤、自杀或急性危机时优先chat，让音乐保持可选和次要，不将歌单当作治疗。简短追加如“再轻柔一点”“不要人声”需结合当前队列和最近对话判断。优先遵守当前要求，不把历史偏好强加到本轮。\n当intent=chat时，同一个JSON必须同时包含reply、recommendedSceneId、sceneTitle、rationale、suggestedFollowUps，直接给用户简短自然的最终回复；本轮没有音乐工具，不改变播放，不虚称任何操作已成功。当前场景无须改变时沿用scene。intent=music时只给出意图和约束，后续真实音乐工具负责执行，不能用文字冒充歌单。用户的个性设置供参考：\n${customPrompt}`},
+          {role:'system',content:COMPANION_PERSONA + `\n本轮合并意图判断与普通对话回复，只输出JSON。包含intent(music或chat)、request(结合最近对话整理的本次要求，保留否定和限制，不解释推理)、constraints(明确的歌手、曲名、风格、情绪、语言等限制字符串数组)。点歌、换歌、编排歌单、要求听喜欢的歌或每日推荐属于music；暂停、继续播放、切歌、清空当前队列、音量增减、静音、播放模式、进度跳转和睡眠定时属于music（播放器控制，直接调用player_control，不需要搜索或编排歌单）；正在听歌时表达失恋等情绪变化且未拒绝音乐，可判music并温柔换歌；明确不想听歌、只想倾诉、询问歌曲知识属于chat。涉及自伤、自杀或急性危机时优先chat，让音乐保持可选和次要，不将歌单当作治疗。简短追加如“再轻柔一点”“不要人声”需结合当前队列和最近对话判断。优先遵守当前要求，不把历史偏好强加到本轮。\n当intent=chat时，同一个JSON必须同时包含reply、recommendedSceneId、sceneTitle、rationale、suggestedFollowUps，直接给用户简短自然的最终回复；本轮没有音乐工具，不改变播放，不虚称任何操作已成功。当前场景无须改变时沿用scene。intent=music时只给出意图和约束，后续真实音乐工具负责执行，不能用文字冒充歌单。用户的个性设置供参考：\n${customPrompt}`},
           ...history,{role:'user',content:JSON.stringify(context)},
         ]}),
       });
@@ -167,6 +171,7 @@ export async function companionChat(body, env, fetchImpl = fetch, signal, music)
             results.set(call,{error:lastMusicError+'；可以调整查询条件，不得声称执行成功。'});trace.push({tool:['search_music','search_online_tracks','get_recommendations_by_mood','daily_music','liked_music'].includes(name)?name:'unknown',ok:false});
           }
         }));
+        const controls = [];
         for(const call of message.tool_calls){
           let result=results.get(call);
           if(['queue_music','create_temporary_playlist'].includes(call.function?.name)){
@@ -191,7 +196,7 @@ export async function companionChat(body, env, fetchImpl = fetch, signal, music)
             try {
               if (!music || dialogueOnly) throw Error('本轮不更改播放');
               const args = JSON.parse(call.function.arguments || '{}');
-              if (!['play','pause','resume','next','previous'].includes(args.action)) throw Error('不支持的播放操作');
+              if (!['play',...PLAYER_ACTIONS].includes(args.action)) throw Error('不支持的播放操作');
               if (args.action === 'play') {
                 // The memory layer supplies this offer from this user's session;
                 // it is never taken from client-supplied history or song IDs.
@@ -211,13 +216,16 @@ export async function companionChat(body, env, fetchImpl = fetch, signal, music)
                 fadeMs = Number.isInteger(args.fade_ms) ? Math.max(0, Math.min(2000, args.fade_ms)) : 800;
               } else {
                 // Control commands do not require a newly generated playlist.
-                return { reply: { pause:'准备暂停音乐。', resume:'准备继续播放。', next:'准备切到下一首。', previous:'准备回到上一首。' }[args.action], playbackAction: args.action, mode:'model', model:COMPANION_MODEL, toolTrace:[...trace,{tool:'player_control',ok:true}] };
+                controls.push(playerControl(args));
               }
               result = { accepted: true, playback: 'pending_client' };
               trace.push({tool:'player_control',ok:true});
             } catch (error) { result = { error: error.message }; trace.push({tool:'player_control',ok:false}); }
           }
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+        }
+        if (controls.length) {
+          return { ...(playlist ? preparedPlaylist() : controls.at(-1)), playerControls: controls.map(item => item.playerControl), mode: 'model', model: COMPANION_MODEL, toolTrace: trace };
         }
         if (playlistIntent && playlist && playbackAction === 'play_queue') return preparedPlaylist();
         if(playlistIntent&&!catalog.size&&queryCount>=4)return playlistFailure(lastMusicError||'这次没有找到符合要求的歌曲，可以换个歌手或风格再试。');

@@ -74,8 +74,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     }
   };
 
-  const progressPercent = currentTrack.duration > 0
-    ? Math.min(100, (currentTime / currentTrack.duration) * 100)
+  const progressPercent = currentTrack.duration > 0 && Number.isFinite(currentTime)
+    ? Math.max(0, Math.min(100, (currentTime / currentTrack.duration) * 100))
     : 0;
 
   return (
@@ -89,11 +89,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           <div className="relative flex-1 group py-1">
             <input
               type="range"
+              aria-label="播放进度"
               min="0"
               max={currentTrack.duration}
               value={currentTime}
               onChange={(e) => onSeek(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-stone-800 rounded-lg appearance-none cursor-pointer accent-amber-400 group-hover:h-2 transition-all"
+              style={{ background: `linear-gradient(to right, #fbbf24 0%, #fbbf24 ${progressPercent}%, #44403c ${progressPercent}%, #44403c 100%)` }}
+              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-amber-400 group-hover:h-2 transition-all"
             />
           </div>
           <span className="font-mono text-xs text-stone-500 tabular-nums w-10">

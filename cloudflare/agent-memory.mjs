@@ -99,7 +99,7 @@ export function createAgentMemory(store, identity, { defer = promise => { void p
         : await companionChat({ ...body, history, longTermMemory: state.summary, pendingPlaylist }, env, fetchImpl, signal, music);
       if (signal?.aborted) return result;
       const messages = boundedHistory([...history, { role: 'user', content: body.message }, { role: 'assistant', content: result.reply }]);
-      const nextOffer = result.playbackAction === 'offer_queue' && result.playlist?.songs?.length
+      const nextOffer = result.playbackAction === 'clear_queue' || result.playerControls?.some(item => item.action === 'clear_queue') ? undefined : result.playbackAction === 'offer_queue' && result.playlist?.songs?.length
         ? { playlist: result.playlist, recommendedSceneId: result.recommendedSceneId }
         : result.playbackAction === 'play_queue' ? undefined : pendingPlaylist;
       state.sessions[id] = { messages, updatedAt: Date.now(), ...(nextOffer ? { pendingPlaylist: nextOffer } : {}) };

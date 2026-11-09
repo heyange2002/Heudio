@@ -4,15 +4,18 @@ import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api';
 import { mergeSongs, type QQSong } from '../utils/music';
 import { TrackCover } from './TrackCover';
-export function QQMusicPanel({ onPlay, onQueue, onAppend, onClear, queue, queueTitle, onRecommend, currentMid, isPlaying }: {
+import { playlistTitle } from '../utils/playlistTitle';
+export function QQMusicPanel({ onPlay, onQueue, onAppend, onClear, queue, queueTitle, onRecommend, currentMid, isPlaying, onError }: {
   onClear?: () => void; onAppend: (songs: QQSong[], title: string) => void; onPlay: (song: QQSong) => void; onQueue: (songs: QQSong[], title: string) => void;
   queue: QQSong[]; queueTitle: string; onRecommend: () => void; currentMid?: string; isPlaying?: boolean;
+  onError?: (message: string) => void;
 }) {
   const [status, setStatus] = useState('正在检查 QQ 音乐…'), [loggedIn, setLoggedIn] = useState(false);
   const [keyword, setKeyword] = useState(''), [songs, setSongs] = useState<QQSong[]>([]), [busy, setBusy] = useState(false);
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [songsTitle, setSongsTitle] = useState('QQ 音乐选集');
   const [error, setError] = useState('');
+  useEffect(() => { if (error) onError?.(error); }, [error, onError]);
   const mounted = useRef(true), generation = useRef(0), statusGeneration = useRef(0);
   const call = async (path: string, options?: RequestInit) => {
     const timeout = AbortSignal.timeout(30000);
@@ -44,7 +47,7 @@ export function QQMusicPanel({ onPlay, onQueue, onAppend, onClear, queue, queueT
   };
   const loadSongs = (path: string, title: string) => run(async () => { const data = await call(path); if (!mounted.current) return; setSongs(data.songs || []); setSongsTitle(title); setPlaylists([]); setStatus(data.songs?.length ? `找到 ${data.songs.length} 首歌曲` : '这次没有查到歌曲，可以换个关键词'); });
   const loadPlaylist = (playlist: any, play: boolean) => run(async () => {
-    const tid = playlist.tid ?? playlist.dissid, dirid = playlist.dirid;
+    const tid = playlist.tid ?? playlist.dissid, dirid = playlist.dirid ?? playlist.dirId;
     if (!tid && dirid === undefined) throw Error('这张歌单缺少可用编号');
     const path = '/user/playlist-detail?' + (tid ? 'tid=' + encodeURIComponent(tid) : 'dirid=' + encodeURIComponent(dirid));
     let data;
@@ -68,24 +71,24 @@ export function QQMusicPanel({ onPlay, onQueue, onAppend, onClear, queue, queueT
       pages.add(fingerprint); offset += count; loaded = mergeSongs(loaded, next);
       setStatus(`正在读取歌单，已载入 ${loaded.length} 首…`);
     }
-    const title = playlist.title || playlist.dissname || '未命名歌单';
+    const title = playlistTitle(playlist);
     if (!loaded.length) throw Error('这张歌单暂无可用歌曲，当前歌单保持不变');
     setSongs(loaded); setSongsTitle(title); setStatus(`「${title}」· ${loaded.length} 首`);
     if (play) onQueue(loaded, title);
   });
   const input = 'rounded-lg border border-stone-700 bg-stone-950 p-2 text-sm';
   return <section aria-label="QQ 音乐" className="rounded-2xl border border-stone-800 bg-stone-900/60 p-5 space-y-4">
-    <div><h2 className="text-base font-semibold">QQ 音乐 · 和阿屿一起选歌</h2><p role="status" className="text-xs text-stone-400 mt-1">{status}</p></div>
+    <div><h2 className="text-base font-semibold">和阿屿一起听歌</h2><p role="status" className="text-xs text-stone-400 mt-1">{status}</p></div>
     <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); if (keyword.trim()) void loadSongs('/search?keyword=' + encodeURIComponent(keyword.trim()), keyword.trim()); }}>
       <input aria-label="搜索 QQ 音乐" className={input + ' flex-1 min-w-40'} maxLength={60} placeholder="搜索歌曲、歌手，也可以直接告诉阿屿想听什么" value={keyword} onChange={e => setKeyword(e.target.value)}/><button disabled={busy || !keyword.trim()} className="rounded-lg bg-amber-400 text-stone-950 px-4 text-sm">{busy ? '查询中…' : '搜索'}</button>
     </form>
     <div className="flex flex-wrap gap-4 text-xs text-amber-300"><button disabled={busy} onClick={() => void loadSongs('/user/daily-songs', '每日推荐')}>每日推荐</button><button disabled={busy} onClick={() => void loadSongs('/user/liked-songs', '我喜欢')}>我喜欢</button>
       <button disabled={busy} onClick={() => run(async () => { const data = await call('/user/playlist'); setPlaylists(data.playlist || []); setSongs([]); setStatus(data.playlist?.length ? '选择歌单查看歌曲，或直接播放' : '暂无歌单'); })}>我的歌单</button>
       <button onClick={onRecommend}>让阿屿为此刻编排</button></div>
-    {error && <p role="alert" className="text-xs text-rose-300">{error}</p>}
+    {error && !onError && <p role="alert" className="text-xs text-rose-300">{error}</p>}
     {!!playlists.length && <ul aria-label="我的歌单清单" className="space-y-2">{playlists.map((playlist,i) => {
-      const title = playlist.title || playlist.dissname || '未命名歌单';
-      return <li key={playlist.tid || playlist.dissid || playlist.dirid || i} className="flex items-center gap-2 rounded-lg border border-stone-800 p-2">
+      const title = playlistTitle(playlist);
+      return <li key={playlist.tid ?? playlist.dissid ?? playlist.dirid ?? playlist.dirId ?? i} className="flex items-center gap-2 rounded-lg border border-stone-800 p-2">
         <button type="button" aria-label={`查看歌单 ${title}`} className="min-w-0 flex-1 truncate text-left text-sm text-stone-300" disabled={busy} onClick={() => loadPlaylist(playlist, false)}>{title}</button>
         <button type="button" aria-label={`播放歌单 ${title}`} disabled={busy} onClick={() => loadPlaylist(playlist, true)} className="flex shrink-0 items-center gap-1 rounded-md bg-amber-400/10 px-2 py-1.5 text-xs text-amber-300 disabled:opacity-40"><Play className="h-3.5 w-3.5" aria-hidden="true"/>播放歌单</button>
       </li>;

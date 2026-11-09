@@ -90,7 +90,7 @@ export function isPlayConfirmation(message) {
 
 export function playbackControlHint(message) {
   const text = String(message || '').trim().replace(/[\s，。！!,.]/g, '');
-  if (/^(?:请|帮我)?暂停(?:播放|音乐)?(?:吧)?$/.test(text)) return 'pause';
+  if (/^(?:请|帮我)?(?:暂停|停止)(?:播放|音乐)?(?:吧)?$/.test(text)) return 'pause';
   if (/^(?:请|帮我)?(?:继续|恢复)(?:播放)?(?:吧)?$/.test(text)) return 'resume';
   if (/^(?:请|帮我)?(?:切到|播放|换到)?下(?:一)?(?:首|曲)(?:吧)?$/.test(text)) return 'next';
   if (/^(?:请|帮我)?(?:切到|播放|换到)?上(?:一)?(?:首|曲)(?:吧)?$/.test(text)) return 'previous';

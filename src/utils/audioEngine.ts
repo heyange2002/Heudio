@@ -14,6 +14,9 @@ export class SoundIsleAudioEngine {
   private preloaded?: { mid: string; controller: AbortController; ready: Promise<HTMLAudioElement | null>; audio?: HTMLAudioElement; createdAt: number };
   private transitionGain = 1;
   private transitionRevision = 0;
+  private playbackGain = 1;
+  private fadeTimer?: ReturnType<typeof setTimeout>;
+  private fadeRevision = 0;
   private volume = 0.85;
   private ducked = false;
   private inputMuted = false;
@@ -36,7 +39,24 @@ export class SoundIsleAudioEngine {
   public setInputMuted(active: boolean) { this.inputMuted = active; this.applyVolume(); }
   public setSpeechDucking(active: boolean) { this.ducked = active; this.applyVolume(); }
   private applyVolume() {
-    if (this.remoteAudio) this.remoteAudio.volume = this.inputMuted ? 0 : (this.ducked ? Math.min(this.volume, 0.05) : this.volume) * this.transitionGain;
+    if (this.remoteAudio) this.remoteAudio.volume = this.inputMuted ? 0 : (this.ducked ? Math.min(this.volume, 0.05) : this.volume) * this.transitionGain * this.playbackGain;
+  }
+  private cancelFade() {
+    this.fadeRevision++;
+    clearTimeout(this.fadeTimer); this.fadeTimer = undefined;
+  }
+  private fadeTo(target: number, duration: number, complete?: () => void) {
+    this.cancelFade();
+    const revision = this.fadeRevision, from = this.playbackGain, started = Date.now();
+    const tick = () => {
+      if (revision !== this.fadeRevision) return;
+      const t = Math.min(1, (Date.now() - started) / duration);
+      this.playbackGain = from + (target - from) * t * t * (3 - 2 * t);
+      this.applyVolume();
+      if (t < 1) this.fadeTimer = setTimeout(tick, 20);
+      else { this.fadeTimer = undefined; complete?.(); }
+    };
+    tick();
   }
   private initContext() {
     const Context = window.AudioContext || (window as any).webkitAudioContext;
@@ -122,13 +142,25 @@ export class SoundIsleAudioEngine {
     if (!track.qqMid) { this.onErrorCallback?.('请先让阿屿选歌，或在音乐侧栏选择一首 QQ 音乐。'); return; }
     this.initContext();
     this.currentTrack = track; this.elapsedSeconds = start; this.isPlaying = true;
+    this.playbackGain = 0;
     void this.playQQTrack(track, start, this.playGeneration, prepared);
   }
-  public pause() {
+  public pause(fadeMs = 0) {
+    this.cancelFade();
     this.transitionRevision++;
     this.playGeneration++; this.playbackController?.abort(); this.playbackController = undefined;
-    if (this.remoteAudio) { this.remoteAudio.pause(); this.remoteAudio.ontimeupdate = null; this.remoteAudio.onended = null; this.remoteAudio.onerror = null; }
-    this.isPlaying = false; this.transitionGain = 1; this.applyVolume();
+    const audio = this.remoteAudio;
+    if (audio) {
+      this.elapsedSeconds = audio.currentTime;
+      audio.ontimeupdate = null; audio.onended = null; audio.onerror = null;
+    }
+    this.isPlaying = false; this.playbackGain *= this.transitionGain; this.transitionGain = 1; this.applyVolume();
+    if (audio && !audio.paused && fadeMs > 0 && this.playbackGain > 0)
+      this.fadeTo(0, Math.min(2000, fadeMs), () => {
+        audio.pause(); this.elapsedSeconds = audio.currentTime;
+        this.onTimeUpdateCallback?.(this.elapsedSeconds);
+      });
+    else audio?.pause();
   }
   public resume() { if (this.currentTrack) this.playTrack(this.currentTrack, this.elapsedSeconds); }
   public seek(seconds: number) {
@@ -182,7 +214,7 @@ export class SoundIsleAudioEngine {
       } };
       await activeAudio.play();
       if (generation !== this.playGeneration) activeAudio.pause();
-      else this.onStartedCallback?.(track);
+      else { this.fadeTo(1, 650); this.onStartedCallback?.(track); }
     } catch (error) {
       if (generation !== this.playGeneration) return;
       this.pause(); this.onErrorCallback?.(error instanceof Error && error.name === 'NotAllowedError' ? '歌曲已准备好，请点击播放继续' : error instanceof Error ? error.message : '歌曲播放失败', { kind: error instanceof UnavailableTrackError ? 'unavailable' : 'other', trackId: track.id });

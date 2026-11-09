@@ -212,3 +212,15 @@ test('overlapping model turns coalesce summaries and retain the newest conversat
   assert.equal(snapshot.shortTerm.length, 4);
   assert.equal(snapshot.shortTerm.at(-2).content, '更正，我长期喜欢的是粤语民谣');
 });
+
+test('clearing the app queue also revokes the pending offer without deleting other memories', async()=>{
+ const {memory,records}=fixture();
+ records.set('agent:memory:user-a',{summary:'保留的音乐偏好',sessions:{'session-a':{messages:[],updatedAt:Date.now(),pendingPlaylist:{playlist:{title:'待确认歌单',songs:[{mid:'verified',title:'真实歌曲'}]}}}}});
+ const noModel=async()=>{throw Error('controls must not call model');};
+ const result=await memory.chat({...request,message:'清空歌单'},env,noModel);
+ assert.equal(result.playbackAction,'clear_queue');
+ assert.equal(records.get('agent:memory:user-a').sessions['session-a'].pendingPlaylist,undefined);
+ assert.equal((await memory.inspect('session-a')).longTerm,'保留的音乐偏好');
+ const start=await memory.chat({...request,message:'开始播放'},env,noModel);
+ assert.equal(start.playbackAction,'resume');assert.equal(start.playlist,undefined);
+});

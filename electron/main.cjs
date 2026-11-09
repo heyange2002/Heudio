@@ -23,7 +23,7 @@ function fail(error) {
   console.error(error);
   quitting = true;
   backend?.kill();
-  if (!smoke) dialog.showErrorBox('声屿 PC 版启动失败', `${error.message}\n配置文件：${configFile || app.getPath('userData')}\n修改配置后请重新启动。`);
+  if (!smoke) dialog.showErrorBox('声屿启动失败', `${error.message}\n配置文件：${configFile || app.getPath('userData')}\n修改配置后请重新启动。`);
   app.exit(1);
 }
 
@@ -44,7 +44,7 @@ async function start() {
   if (process.platform === 'darwin') app.dock.setIcon(appIcon);
   const config = readConfig();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: '声屿 PC 版', submenu: [
+    { label: '声屿', submenu: [
       { label: '打开配置文件', click: () => shell.openPath(configFile) },
       { label: '打开数据目录', click: () => shell.openPath(app.getPath('userData')) },
       { type: 'separator' }, { role: 'quit', label: '退出声屿' },
@@ -85,7 +85,7 @@ async function start() {
 
 async function createWindow() {
   window = new BrowserWindow({
-    title: '声屿 SoundIsle · PC 版', width: 1440, height: 960, minWidth: 1100, minHeight: 720,
+    title: '声屿 SoundIsle', width: 1440, height: 960, minWidth: 1100, minHeight: 720,
     backgroundColor: '#0c0a09', show: false,
     icon: appIcon,
     titleBarStyle: 'hidden',

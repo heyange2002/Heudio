@@ -218,6 +218,7 @@ test("mobile scene recommendations use the shared agent and audio pipeline, pres
     assert(audios.some((a) => a.src.endsWith("b".repeat(48))));
     assert(document.body.textContent?.includes("歌曲 second"));
     await click("暂停");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 700)); });
     assert(audios.at(-1).paused);
     await act(async () => root.unmount());
     const stored = JSON.parse(
@@ -576,4 +577,36 @@ test("sleep timer uses a wall-clock deadline and restores volume after expiry in
     audioEngine.setMasterVolume = oldVolume;
     page.window.close();
   }
+});
+
+test('agent commands change the actual player queue, volume, mute, seek, mode and timer', async () => {
+  const {page,root}=setup(),oldFetch=globalThis.fetch,oldAudio=globalThis.Audio;
+  const {companionChat}=await import('../cloudflare/companion.mjs');
+  const audios:any[]=[];
+  globalThis.Audio=class {volume=1;currentTime=0;paused=false;ontimeupdate=null;onended=null;onerror=null;constructor(public src:string){audios.push(this);}play=async()=>{this.paused=false;};pause(){this.paused=true;}removeAttribute(){}load(){}} as any;
+  globalThis.fetch=async(url,options)=>{
+    const path=String(url);
+    if(path==='/api/agent/chat')return Response.json(await companionChat(JSON.parse(options!.body as string),{},async()=>{throw Error('no model needed');}));
+    if(path.includes('/api/music/getMusicPlay/'))return Response.json({data:{playUrl:{controlSong:{url:'/api/music/stream/'+'a'.repeat(48)}}}});
+    return Response.json({data:{},shortTerm:[],summary:''});
+  };
+  let core:ReturnType<typeof useSoundisle>;
+  function Harness(){core=useSoundisle({voiceTts:'silent',voiceAutoPlay:false});return null;}
+  const send=async(text:string)=>act(async()=>core!.handleSendMessage(text));
+  try{
+    await act(async()=>root.render(<Harness/>));
+    await act(async()=>core!.installQueue([song('controlSong')],'操作测试','rest',true));
+    await act(async()=>{await new Promise(r=>setTimeout(r,720));});
+    const audio=audios.at(-1);assert(audio);
+    await send('音量调到百分之五十');assert.equal(core!.volume,.5);assert.equal(audio.volume,.5);
+    await send('音量降低10%');assert.equal(core!.volume,.4);assert.equal(audio.volume,.4);
+    await send('静音');assert.equal(core!.volume,0);assert.equal(audio.volume,0);
+    await send('取消静音');assert.equal(core!.volume,.4);assert.equal(audio.volume,.4);
+    await send('单曲循环');assert.equal(core!.settings.playbackMode,'repeat-one');
+    await send('跳到一分三十秒');assert.equal(core!.currentTime,90);assert.equal(audio.currentTime,90);
+    await send('定时十分钟');assert.equal(core!.settings.sleepTimerMinutes,10);
+    await send('取消定时');assert.equal(core!.settings.sleepTimerMinutes,null);
+    await send('清空歌单');assert.equal(core!.qqQueue.length,0);assert.equal(core!.isPlaying,false);assert.equal(audio.paused,true);assert.match(core!.messages.at(-1)!.content,/当前播放列表已清空/);
+    await send('开始播放');assert.equal(core!.isPlaying,false);
+  }finally{await act(async()=>root.unmount());globalThis.fetch=oldFetch;globalThis.Audio=oldAudio;page.window.close();}
 });

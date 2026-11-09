@@ -1,3 +1,4 @@
+import { AppNotifications, notifyError } from './components/AppNotifications';
 import { QQMusicPanel } from './components/QQMusicPanel';
 import { MusicSidebar } from './components/MusicSidebar';
 import { LyricsModal } from './components/LyricsModal';
@@ -14,7 +15,7 @@ import { audioEngine } from './utils/audioEngine';
 import { nextPlaybackMode } from './utils/playbackOrder';
 import { newAgentSession } from './utils/agentSession';
 export default function App() {
-  const { tracks,currentTrackIndex,currentTrack,currentTime,currentScene,volume,isPlaying,playbackConfirmed,settings,setSettings,equalizer,setEqualizer,isEqualizerOpen,setIsEqualizerOpen,isSettingsOpen,setIsSettingsOpen,isMusicOpen,setIsMusicOpen,isLyricsOpen,setIsLyricsOpen,lyricStyle,setLyricStyle,agentPrompt,setAgentPrompt,speechState,speechPlayer,messages,setMessages,isLoadingAgent,agentSessionId,setAgentSessionId,conversationRevision,agentPlaybackPending,profile,setProfile,listeningHistory,setListeningHistory,qqQueue,queueTitle,musicError,agentStatus,setAgentStatus,weatherText,timeContextText,view,handleTogglePlay,handleNext,handlePrev,handleSeek,handleVolumeChange,handleSelectScene,clearQueue,appendQueue,playQQSong,installQueue,handleSendMessage,handleSpeak } = useSoundisle();
+  const { tracks,currentTrackIndex,currentTrack,currentTime,currentScene,volume,isPlaying,playbackConfirmed,settings,setSettings,equalizer,setEqualizer,isEqualizerOpen,setIsEqualizerOpen,isSettingsOpen,setIsSettingsOpen,isMusicOpen,setIsMusicOpen,isLyricsOpen,setIsLyricsOpen,lyricStyle,setLyricStyle,agentPrompt,setAgentPrompt,speechState,speechPlayer,messages,setMessages,isLoadingAgent,agentSessionId,setAgentSessionId,conversationRevision,agentPlaybackPending,profile,setProfile,listeningHistory,setListeningHistory,qqQueue,queueTitle,musicError,agentStatus,agentError,setAgentStatus,weatherText,timeContextText,view,handleTogglePlay,handleNext,handlePrev,handleSeek,handleVolumeChange,handleSelectScene,clearQueue,appendQueue,playQQSong,installQueue,handleSendMessage,handleSpeak } = useSoundisle();
   return (
     <div
       className="app-shell min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans transition-colors duration-700 selection:bg-amber-400/30 selection:text-amber-200"
@@ -29,15 +30,16 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)} />
 
       {/* Main Container */}
-      <MusicSidebar isOpen={isMusicOpen} onToggle={()=>setIsMusicOpen(prev=>!prev)} onClose={()=>setIsMusicOpen(false)} count={qqQueue.length}>
+      <MusicSidebar isOpen={isMusicOpen} onToggle={()=>setIsMusicOpen(prev=>!prev)} onClose={()=>setIsMusicOpen(false)} count={qqQueue.length} motionEnabled={settings.motionEnabled}>
         <QQMusicPanel
+          onError={notifyError}
           onPlay={playQQSong} onQueue={(songs, title) => installQueue(songs, title, currentScene, true)} onAppend={appendQueue} onClear={clearQueue} queue={qqQueue} queueTitle={queueTitle} currentMid={currentTrack.qqMid} isPlaying={isPlaying}
           onRecommend={() => { setIsMusicOpen(false); setSettings(prev => ({ ...prev, musicSource: 'qq-music', pureMusicMode: false })); void handleSendMessage('结合我的音乐偏好、当前时间、天气和工作状态，为我编排一张适合现在听的 QQ 音乐歌单。', 'qq-music', 'playlist'); }}/>
         {settings.musicSource === 'qq-music' && !currentTrack.qqMid && <p className="px-2 text-xs leading-relaxed text-stone-500">还未选择歌曲。搜索歌曲或让阿屿选歌后，即可播放 QQ 音乐。</p>}
       </MusicSidebar>
 
-      <main className={`flex-1 max-w-7xl w-full mx-auto pl-16 pr-4 sm:pr-6 2xl:pl-6 py-6 pb-36 space-y-6 ${settings.pureMusicMode ? 'pure-music-main' : 'md:h-[calc(100dvh-4rem)] md:min-h-[640px] md:flex md:flex-col md:flex-none md:pb-32'}`}>
-        {musicError && <p role="alert" className="text-sm text-rose-300">{musicError}</p>}
+      <main className={`desktop-workspace flex-1 w-full mx-auto pl-16 pr-4 sm:pr-6 py-6 pb-36 space-y-6 ${settings.pureMusicMode ? 'pure-music-main' : 'md:h-[calc(100dvh-4rem)] md:min-h-[640px] md:flex md:flex-col md:flex-none md:pb-32'}`}>
+
         {/* 2. Core Workspace Layout */}
         <div id="music-workspace" tabIndex={-1} className={`scroll-mt-32 lg:scroll-mt-24 outline-none ${settings.pureMusicMode ? 'pure-music-workspace' : 'md:flex-1 md:min-h-0'}`} data-view={view}>
         {view === 'music' ? (
@@ -70,7 +72,7 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start md:items-stretch md:h-full md:min-h-0">
             {/* Left Column: Agent Companion & Measured Dialogue */}
             <div className="md:col-span-6 xl:col-span-5 space-y-4 md:flex md:flex-col md:min-h-0">
-              {agentStatus && <p role="status" className="text-xs text-stone-400">{agentStatus}</p>}
+
               <AgentCompanion
                 onPlaylistAction={(playlist, action, scene) => {
                   if (action === 'play') { agentPlaybackPending.current = true; installQueue(playlist.songs, playlist.title, scene, true, 800); }
@@ -83,6 +85,9 @@ export default function App() {
                 currentScene={currentScene}
                 weatherText={weatherText}
                 timeContextText={timeContextText}
+                city={profile.city}
+                workState={profile.workState}
+                motionEnabled={settings.motionEnabled}
                 onSpeakMessage={settings.voiceTts === 'silent' ? undefined : handleSpeak}
                 speechState={speechState}
                 onStopSpeech={() => speechPlayer.stop()}
@@ -124,6 +129,8 @@ export default function App() {
         lyrics={currentTrack.lyrics} currentTime={currentTime} onSeek={handleSeek} accentColor={currentTrack.themeColors.accent}
         coverUrl={currentTrack.coverUrl} trackId={currentTrack.id} duration={currentTrack.duration} isPlaying={isPlaying} motionEnabled={settings.motionEnabled}
         onTogglePlay={handleTogglePlay} lyricStyle={lyricStyle} onStyleChange={setLyricStyle}/>
+
+      <AppNotifications musicError={musicError} agentError={agentError} speechError={speechState.error}/>
 
       {/* Floating Bottom Player Controls Dock */}
       <PlayerControls
