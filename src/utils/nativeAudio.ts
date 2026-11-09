@@ -215,13 +215,17 @@ export class AndroidAudioEngine {
         this.mode,
         true,
       );
-    else this.send("play", { mid: track.qqMid, position: start });
+    else this.send("play", {
+      mid: track.qqMid,
+      position: start,
+      resume: this.last?.mid === track.qqMid && Math.abs(start - this.position) < 1,
+    });
   }
   pause() {
     this.send("pause");
   }
   resume() {
-    this.send("play", { mid: this.last?.mid, position: this.position });
+    this.send("play", { mid: this.last?.mid, position: this.position, resume: true });
   }
   next() {
     this.send("next");

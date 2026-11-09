@@ -67,7 +67,7 @@ public class PlaybackServiceTest {
   @Test
   public void queueAndSystemPlayerControlsSurviveDetachingThePage() throws Exception {
     assertEquals(1, service.getSessions().size());
-    assertSame(player, service.getSessions().get(0).getPlayer());
+    assertNotSame(player, service.getSessions().get(0).getPlayer());
     command(
         "queue",
         new JSONObject()
@@ -82,7 +82,7 @@ public class PlaybackServiceTest {
     assertEquals(C.USAGE_MEDIA, player.getAudioAttributes().usage);
     service.detach(listener);
     int updates = states.size();
-    player.seekToNextMediaItem();
+    service.getSessions().get(0).getPlayer().seekToNextMediaItem();
     Shadows.shadowOf(Looper.getMainLooper()).idle();
     assertEquals("two", player.getCurrentMediaItem().mediaId);
     assertEquals(updates, states.size());
@@ -179,5 +179,33 @@ public class PlaybackServiceTest {
     assertEquals(0f, player.getVolume(), .0001f);
     service.releaseTransientAudio();
     assertEquals(.8f, player.getVolume(), .0001f);
+  }
+
+  @Test
+  public void systemControlsAndPageCommandsArmTheSameFadeAndCancelPendingStarts() throws Exception {
+    command("queue", new JSONObject().put("songs", songs("one")).put("mid", "one"));
+    Player controls = service.getSessions().get(0).getPlayer();
+    controls.play();
+    assertTrue(player.getPlayWhenReady());
+    assertEquals(0, player.getVolume(), .0001f);
+    command("pause", new JSONObject());
+    assertFalse(player.getPlayWhenReady());
+    Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2));
+    assertFalse(player.getPlayWhenReady());
+    controls.setPlayWhenReady(true);
+    assertTrue(player.getPlayWhenReady());
+    assertEquals(0, player.getVolume(), .0001f);
+    controls.pause();
+    assertFalse(player.getPlayWhenReady());
+  }
+
+  @Test
+  public void resumeKeepsTheNativePositionInsteadOfSeekingToAStalePageSnapshot() throws Exception {
+    command("queue", new JSONObject().put("songs", songs("one")).put("mid", "one").put("position", 42));
+    command("play", new JSONObject().put("mid", "one").put("position", 40).put("resume", true));
+    assertEquals(42000, player.getCurrentPosition());
+    command("pause", new JSONObject());
+    command("play", new JSONObject().put("mid", "one").put("position", 5).put("resume", false));
+    assertEquals(5000, player.getCurrentPosition());
   }
 }

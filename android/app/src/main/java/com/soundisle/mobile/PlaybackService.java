@@ -12,6 +12,7 @@ import android.os.SystemClock;
 import androidx.annotation.OptIn;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
@@ -51,6 +52,8 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   private final Handler handler = new Handler(Looper.getMainLooper());
+  private final PlaybackFade fade = new PlaybackFade(handler, this::applyVolume);
+  private boolean fadeInPending = false, pauseAfterFade = false;
   private final Set<String> failed = new HashSet<>();
   private ExoPlayer player;
   private MediaSession session;
@@ -83,7 +86,7 @@ public final class PlaybackService extends MediaSessionService {
             long remaining = deadline - SystemClock.elapsedRealtime();
             if (remaining <= 0) {
               deadline = 0;
-              player.pause();
+              pauseImmediately();
             }
             applyVolume();
           }
@@ -162,6 +165,35 @@ public final class PlaybackService extends MediaSessionService {
     player.addListener(
         new Player.Listener() {
           @Override
+          public void onIsPlayingChanged(boolean isPlaying) {
+            if (isPlaying && fadeInPending && !pauseAfterFade) {
+              fadeInPending = false;
+              fade.to(1, null);
+            } else if (!isPlaying && player.getPlayWhenReady() && !pauseAfterFade) {
+              // Buffering or temporary focus suppression must not consume the
+              // fade while no audio is audible.
+              fadeInPending = true;
+              fade.reset(0);
+            }
+          }
+
+          @Override
+          public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+            if (!playWhenReady) {
+              // Audio-focus loss, unplugging headphones and hard stops must
+              // cancel pending work immediately, without any delayed resume.
+              pauseAfterFade = false;
+              fadeInPending = false;
+              fade.reset(0);
+            } else if (!pauseAfterFade && fade.gain() == 0) {
+              fadeInPending = true;
+              if (player.isPlaying()) {
+                fadeInPending = false;
+                fade.to(1, null);
+              }
+            }
+          }
+          @Override
           public void onEvents(Player p, Player.Events events) {
             if (equalizer == null
                 && player.getPlaybackState() == Player.STATE_READY
@@ -186,7 +218,14 @@ public final class PlaybackService extends MediaSessionService {
             0,
             new Intent(this, MainActivity.class),
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-    session = new MediaSession.Builder(this, player).setSessionActivity(activity).build();
+    Player controls = new ForwardingPlayer(player) {
+      @Override public void play() { playSmoothly(false); }
+      @Override public void pause() { pauseSmoothly(); }
+      @Override public void setPlayWhenReady(boolean ready) {
+        if (ready) playSmoothly(false); else pauseSmoothly();
+      }
+    };
+    session = new MediaSession.Builder(this, controls).setSessionActivity(activity).build();
     // The UI uses a local binder, so no MediaController connection registers this session for us.
     addSession(session);
     applyVolume();
@@ -194,11 +233,12 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   void handlePlaybackError(PlaybackException e) {
+    if (pauseAfterFade) { pauseImmediately(); publish(); return; }
     for (Throwable cause = e; cause != null; cause = cause.getCause()) {
       if (cause instanceof AuthExpired
           || (cause instanceof HttpDataSource.InvalidResponseCodeException
               && ((HttpDataSource.InvalidResponseCodeException) cause).responseCode == 401)) {
-        player.pause();
+        pauseImmediately();
         locked = true;
         error = "无法直接连接，请回到声屿检查手机服务地址";
         publish();
@@ -220,7 +260,7 @@ public final class PlaybackService extends MediaSessionService {
       if (next >= 0 && next < count && !failed.contains(player.getMediaItemAt(next).mediaId)) {
         player.seekTo(next, 0);
         player.prepare();
-        player.play();
+        playSmoothly(true);
         return;
       }
       // A shuffled successor may already have failed; then use the remaining queue.
@@ -229,12 +269,12 @@ public final class PlaybackService extends MediaSessionService {
         if (!failed.contains(player.getMediaItemAt(candidate).mediaId)) {
           player.seekTo(candidate, 0);
           player.prepare();
-          player.play();
+          playSmoothly(true);
           return;
         }
       }
     }
-    player.pause();
+    pauseImmediately();
     error = "当前歌单暂时无法播放，请检查授权或网络后重试";
     publish();
   }
@@ -277,13 +317,13 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   public void deferNotice() {
-    player.pause();
+    pauseImmediately();
     error = "音乐已准备好，请回到应用后点击播放";
     publish();
   }
 
   public void clear() {
-    player.pause();
+    pauseImmediately();
     player.stop();
     player.clearMediaItems();
     queue = new JSONArray();
@@ -388,19 +428,21 @@ public final class PlaybackService extends MediaSessionService {
         if (items.size() > player.getMediaItemCount())
           player.addMediaItems(items.subList(player.getMediaItemCount(), items.size()));
       } else if (!same || !selected.equals(old)) {
+        if (play) armFadeIn();
         player.setMediaItems(items, index, position);
         if (play) {
           failed.clear();
           error = "";
           player.prepare();
-          player.play();
+          playSmoothly(false);
         }
       } else if (command.optBoolean("restart")) {
+        if (play) armFadeIn();
         failed.clear();
         error = "";
         player.seekTo(index, position);
         player.prepare();
-        player.setPlayWhenReady(play);
+        if (play) playSmoothly(false); else pauseImmediately();
       }
       publish();
       return;
@@ -409,14 +451,18 @@ public final class PlaybackService extends MediaSessionService {
       failed.clear();
       error = "";
       String mid = command.optString("mid");
+      String oldMid = player.getCurrentMediaItem() == null ? "" : player.getCurrentMediaItem().mediaId;
+      if (!player.getPlayWhenReady() || pauseAfterFade || !mid.equals(oldMid)) armFadeIn();
+      boolean resume = command.optBoolean("resume") && mid.equals(oldMid)
+          && player.getPlaybackState() != Player.STATE_ENDED;
       for (int i = 0; i < player.getMediaItemCount(); i++)
-        if (player.getMediaItemAt(i).mediaId.equals(mid)) {
+        if (!resume && player.getMediaItemAt(i).mediaId.equals(mid)) {
           player.seekTo(i, Math.max(0, (long) (command.optDouble("position", 0) * 1000)));
           break;
         }
       player.prepare();
-      player.play();
-    } else if ("pause".equals(action)) player.pause();
+      playSmoothly(false);
+    } else if ("pause".equals(action)) pauseSmoothly();
     else if ("clear".equals(action)) clear();
     else if ("seek".equals(action))
       player.seekTo(Math.max(0, (long) (command.optDouble("position") * 1000)));
@@ -424,13 +470,14 @@ public final class PlaybackService extends MediaSessionService {
       failed.clear();
       error = "";
       if (player.getMediaItemCount() > 0) {
+        armFadeIn();
         if ("next".equals(action)) {
           if (player.hasNextMediaItem()) player.seekToNextMediaItem();
           else player.seekTo(0, 0);
         } else if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem();
         else player.seekTo(0, 0);
         player.prepare();
-        player.play();
+        playSmoothly(false);
       }
     } else if ("volume".equals(action)) {
       volume = (float) Math.max(0, Math.min(1, command.optDouble("value", .85)));
@@ -465,6 +512,7 @@ public final class PlaybackService extends MediaSessionService {
   }
 
   private void applyVolume() {
+    if (player == null) return;
     float peak = 0;
     if (eqEnabled && equalizer != null) for (float g : gains) peak = Math.max(peak, g);
     float value = muted ? 0 : ducked ? Math.min(volume, .05f) : volume;
@@ -472,7 +520,41 @@ public final class PlaybackService extends MediaSessionService {
         deadline > 0
             ? Math.min(1, Math.max(0, (deadline - SystemClock.elapsedRealtime()) / 30000f))
             : 1;
-    player.setVolume((float) (value * Math.pow(10, -peak / 20) * fade));
+    player.setVolume((float) (value * Math.pow(10, -peak / 20) * fade * this.fade.gain()));
+  }
+
+  private void armFadeIn() {
+    boolean reversing = pauseAfterFade;
+    pauseAfterFade = false;
+    fadeInPending = true;
+    if (reversing) fade.cancel(); else fade.reset(0);
+  }
+
+  private void playSmoothly(boolean fresh) {
+    if (fresh || pauseAfterFade || !player.getPlayWhenReady()) armFadeIn();
+    player.play();
+    // A resume can already be ready; buffering starts the fade in the listener.
+    if (player.isPlaying() && fadeInPending) {
+      fadeInPending = false;
+      fade.to(1, null);
+    }
+    publish();
+  }
+
+  private void pauseSmoothly() {
+    if (pauseAfterFade) return;
+    fadeInPending = false;
+    if (!player.isPlaying() || fade.gain() <= 0) { pauseImmediately(); return; }
+    pauseAfterFade = true;
+    fade.to(0, () -> { pauseAfterFade = false; player.pause(); publish(); });
+    publish();
+  }
+
+  private void pauseImmediately() {
+    pauseAfterFade = false;
+    fadeInPending = false;
+    fade.reset(0);
+    player.pause();
   }
 
   private void releaseEqualizer() {
@@ -535,9 +617,14 @@ public final class PlaybackService extends MediaSessionService {
           "playing",
           player.getMediaItemCount() > 0
               && player.getPlayWhenReady()
+              && !pauseAfterFade
               && player.getPlaybackSuppressionReason() == Player.PLAYBACK_SUPPRESSION_REASON_NONE
               && player.getPlaybackState() != Player.STATE_ENDED);
-      state.put("confirmed", player.isPlaying());
+      state.put("confirmed", player.isPlaying() && !pauseAfterFade);
+      if (BuildConfig.DEBUG) {
+        state.put("fadeGain", fade.gain());
+        state.put("effectiveVolume", player.getVolume());
+      }
       state.put("mode", mode);
       state.put("error", error);
       state.put("locked", locked);

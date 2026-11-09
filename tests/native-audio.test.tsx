@@ -93,6 +93,12 @@ test("native queue, controls, sleep timer and ducking use commands without expos
   const count = h.commands.length;
   engine.setSleepTimer(7);
   assert.equal(h.commands.length, count);
+  engine.playTrack(qqTrack(songs[1], "rest"), 42);
+  assert.equal(h.commands.at(-1).resume, true);
+  engine.playTrack(qqTrack(songs[1], "rest"), 0);
+  assert.equal(h.commands.at(-1).resume, false);
+  engine.resume();
+  assert.equal(h.commands.at(-1).resume, true);
   engine.installQueue(
     songs.map((s) => qqTrack(s, "rest")),
     "Evening",
